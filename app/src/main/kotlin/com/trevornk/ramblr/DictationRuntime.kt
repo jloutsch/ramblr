@@ -116,6 +116,9 @@ interface RuntimeListener {
 internal class TranscriberHooks(
     val createLocal: (Context, String) -> LocalTranscriber? = { ctx, name -> LocalTranscriber.create(ctx, name) },
     val releaseLocal: (LocalTranscriber) -> Unit = { it.release() },
+    /** Unsegmented batch decode (#310: lets a test prove a lazily loaded recognizer is the one
+     *  that actually transcribes; the real [LocalTranscriber] needs a native model). */
+    val decodeLocal: (LocalTranscriber, FloatArray, Int) -> String = { t, samples, rate -> t.transcribe(samples, rate) },
     val createStreaming: (Context, Model) -> StreamingTranscriber? = { ctx, model -> StreamingTranscriber.create(ctx, model) },
     val releaseStreaming: (StreamingTranscriber) -> Unit = { it.release() },
     val runOffMain: (() -> Unit) -> Unit = { work -> thread { work() } },
@@ -414,7 +417,59 @@ class DictationRuntime internal constructor(
     // service-connect load) waits for that load instead of seeing an empty slot.
     private val localModelLoadLock = Any()
 
-    internal fun initLocalModel() = synchronized(localModelLoadLock) { initLocalModelLocked() }
+    /**
+     * The preload entry point (service connect, IME show, post-trim / post-cleanup reload,
+     * settings and download reloads). Preloads the batch recognizer only when `use_local` is on
+     * (#310, [BatchRecognizerPolicy]); otherwise it loads nothing and drops a recognizer left over
+     * from before the user switched to cloud. A LOCAL fallback candidate in a cloud-first chain is
+     * not preloaded: [awaitLocalTranscriber] loads it on demand through [initLocalModelLocked],
+     * which bypasses this gate by design.
+     */
+    internal fun initLocalModel() = synchronized(localModelLoadLock) {
+        if (batchRecognizerCanBeUsed()) {
+            initLocalModelLocked()
+        } else {
+            releaseUnusedBatchRecognizerLocked()
+        }
+    }
+
+    private fun batchRecognizerCanBeUsed(): Boolean = BatchRecognizerPolicy.canBeUsed(
+        useLocal = prefs().getBoolean("use_local", true),
+    )
+
+    private fun releaseUnusedBatchRecognizerLocked() {
+        Log.i(TAG, "On-device batch recognizer not preloaded: use_local is off")
+        val release = transcriberLifecycle.beginRelease() ?: return
+        transcriberLifecycle.releaseIfCurrent(release)
+    }
+
+    /**
+     * Re-evaluates the preload after `use_local` changed: loads when it newly can be used,
+     * releases when it no longer can, and otherwise leaves a loaded recognizer alone.
+     * Off-main only.
+     */
+    internal fun syncBatchRecognizerWithSettings() = synchronized(localModelLoadLock) {
+        if (shuttingDown) return@synchronized
+        if (!batchRecognizerCanBeUsed()) {
+            releaseUnusedBatchRecognizerLocked()
+        } else if (transcriberSlot.get() == null) {
+            initLocalModelLocked()
+        }
+    }
+
+    // #310: use_local is written from several screens, so watching the pref here is what
+    // guarantees "switch to local" loads the model. SharedPreferences
+    // holds listeners weakly, hence the field; unregistered in [beginShutdown].
+    private val batchPolicyPrefsListener =
+        android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key in BatchRecognizerPolicy.DEPENDENT_PREF_KEYS && !shuttingDown) {
+                transcriberHooks.runOffMain { syncBatchRecognizerWithSettings() }
+            }
+        }
+
+    init {
+        prefs().registerOnSharedPreferenceChangeListener(batchPolicyPrefsListener)
+    }
 
     private fun initLocalModelLocked() {
         val initialization = transcriberLifecycle.beginInitialization() ?: return
@@ -1398,7 +1453,7 @@ class DictationRuntime internal constructor(
                             transcriber.transcribeSegmented(file, vad, SAMPLE_RATE)
                         } else {
                             Log.i(TAG, "VAD model unavailable — decoding unsegmented (#132)")
-                            transcriber.transcribe(PcmFileBuffer.readAsFloatArray(file), SAMPLE_RATE)
+                            transcriberHooks.decodeLocal(transcriber, PcmFileBuffer.readAsFloatArray(file), SAMPLE_RATE)
                         }
                     } ?: throw IllegalStateException("Local model was unloaded during transcription")
                 } finally {
@@ -2034,6 +2089,7 @@ class DictationRuntime internal constructor(
             transcriberLifecycle.beginShutdown()
             streamingTranscriberLifecycle.beginShutdown()
         }
+        prefs().unregisterOnSharedPreferenceChangeListener(batchPolicyPrefsListener)
         cancelIdleUnload()
         val lease = sessionLease
         if (recordingEngine != null) shutdownLeaseAwaitingReader = lease
