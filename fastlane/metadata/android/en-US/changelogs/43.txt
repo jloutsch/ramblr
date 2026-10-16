@@ -1,0 +1,6 @@
+Better cleanup, and much less memory when idle.
+
+- New default cleanup style, Natural: joins broken sentences, drops fillers and keeps your tone, without adding or swapping words. Formal is still available.
+- Risky cloud cleanup now falls back to your raw transcript.
+- Silent taps say "No speech detected" instead of inserting your vocabulary list.
+- On-device models only load when you use on-device transcription, and unload after 5 idle minutes.
