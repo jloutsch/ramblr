@@ -1,0 +1,4 @@
+Pick your cleanup style and fix mistakes without leaving the Ramblr keyboard.
+
+- New style button next to the mic on the Ramblr Voice keyboard: turn cleanup on or off and choose a style. It stays in sync with the floating icon's long-press menu, and changes apply to your next dictation.
+- New edit keys on the keyboard: Backspace (hold to repeat), Space, and Enter. Enter adds a new line in multi-line boxes and runs the field's own action (Search, Go, Done) in single-line ones. It never sends a multi-line chat message.
