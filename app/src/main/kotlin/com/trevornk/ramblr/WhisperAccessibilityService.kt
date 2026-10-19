@@ -298,6 +298,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
          *  target app's input and feel janky. The very first partial of a recording bypasses this
          *  (see [shouldInjectPartial]) so live preview doesn't feel laggy at speech onset. */
         private const val STREAMING_PARTIAL_MIN_INTERVAL_MS = 400L
+        private const val PARTIAL_CARET_NUDGE_DELAY_MS = 150L
         /** Clipboard-fallback feedback stays up much longer than a normal success bubble (#5): it's
          *  the only record the user gets that injection didn't happen, so it shouldn't be easy to miss. */
         private const val FALLBACK_FEEDBACK_DURATION_MS = 6000L
@@ -442,7 +443,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // (the exact risk #245 flagged for naive interim injection). Preview-before-inject
         // is honored because maybeInjectPartial() itself branches on that toggle first.
         override fun onCloudLiveInterim(text: String) {
-            maybeInjectPartial(text)
+            // Gemini's interim is already cased and punctuated: display it as received. Only the
+            // on-device model's raw ALL-CAPS partials go through smartCapitalize (which would
+            // lowercase "I", names and acronyms here).
+            maybeInjectPartial(text, requireRecording = true, alreadyCased = true)
         }
 
         override fun deliverText(
@@ -750,7 +754,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // restore it. Empty when the first partial was a pure insertion.
         val replacedText: String,
         var lastInjectedText: String?,
-        var lastInjectedAtMs: Long
+        var lastInjectedAtMs: Long,
+        // What the last write did to the field, so a write the target dropped or reverted can't
+        // leave the tracked span describing text that isn't there (see StreamingWriteTrace).
+        var trace: StreamingWriteTrace? = null,
     )
     private var streamingSession: StreamingPreviewSession? = null
 
@@ -781,6 +788,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private val screenH get() = resources.displayMetrics.heightPixels
 
     override fun onServiceConnected() {
+        DictationTextWriter.diagnostic = { Log.w(TAG, it) }
         instance = this
         // #156 guard rail: record that this install has a working service (the signal that
         // separates "killed by the OS shortcut switch" from "never enabled") and re-arm the
@@ -2152,7 +2160,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         container.addView(styleMenuDivider())
 
-        val streamingEnabled = prefs().getBoolean("streaming_preview_enabled", false)
+        val streamingEnabled = isLivePreviewOn(
+            settingEnabled = prefs().getBoolean("streaming_preview_enabled", false),
+            streamingModelInstalled = ModelDownloader.isInstalled(this, selectedStreamingModel()),
+            cloudLiveEnabled = CloudLiveToggle.isEnabled(this)
+        )
         container.addView(
             styleMenuRow(
                 icon = null,
@@ -2330,14 +2342,16 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     /** Streaming live-preview on/off from the style menu (#57) -- reads/writes the exact same
      *  "streaming_preview_enabled" pref MainActivity's Settings toggle uses (see
-     *  MainActivity.onStreamingPreviewToggle), including the same "model must be installed"
-     *  gate, so both surfaces always agree on state and neither can turn on a live preview with
-     *  nothing installed to back it. */
+     *  LivePreviewActivity.onStreamingPreviewToggle), including the same "model installed or
+     *  Cloud Live on" gate ([canEnableLivePreview]), so both surfaces always agree on state and
+     *  neither can turn on a live preview with nothing to back it. */
     private fun onStyleMenuStreamingToggleTapped() {
-        val enabling = !prefs().getBoolean("streaming_preview_enabled", false)
-        if (enabling && !ModelDownloader.isInstalled(this, selectedStreamingModel())) {
+        val modelInstalled = ModelDownloader.isInstalled(this, selectedStreamingModel())
+        val cloudLive = CloudLiveToggle.isEnabled(this)
+        val enabling = !isLivePreviewOn(prefs().getBoolean("streaming_preview_enabled", false), modelInstalled, cloudLive)
+        if (enabling && !canEnableLivePreview(modelInstalled, cloudLive)) {
             dismissStyleMenu()
-            toast("Download the streaming model in Ramblr settings first")
+            toast("Download the streaming model or turn on Cloud Live in Ramblr settings first")
             return
         }
         prefs().edit().putBoolean("streaming_preview_enabled", enabling).apply()
@@ -2552,7 +2566,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     /** [requireRecording] is false only for the debug-build `DEBUG_PARTIAL` test seam, which drives
      *  this path without a live recording; every production caller goes through the overload above. */
-    internal fun maybeInjectPartial(text: String, requireRecording: Boolean) {
+    internal fun maybeInjectPartial(text: String, requireRecording: Boolean, alreadyCased: Boolean = false) {
         if (requireRecording && !runtime.isRecording()) return // stale post after stop/cancel raced this
         if (text.isBlank()) return
         val now = System.currentTimeMillis()
@@ -2561,8 +2575,14 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // is on, the real field must never be touched until the user explicitly commits, so route
         // the live partial into the floating feedback bubble instead of the field. When it's off,
         // fall through to the existing direct-field-write behavior completely unchanged.
-        if (shouldRouteStreamingPartialToBubble(PreviewBeforeInjectToggle.isEnabled(this))) {
-            updateLivePreviewBubble(text, now)
+        // Live preview OFF is the same promise: the field is untouched until the final text.
+        // Cloud Live interims (#245) arrive here whether or not the user turned the setting on.
+        if (shouldRouteStreamingPartialToBubble(
+                PreviewBeforeInjectToggle.isEnabled(this),
+                livePreviewEnabled = prefs().getBoolean("streaming_preview_enabled", false),
+            )
+        ) {
+            updateLivePreviewBubble(text, now, alreadyCased)
             return
         }
 
@@ -2577,7 +2597,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 candidate.isEditable,
                 candidate.isFocused,
             )
-            val displayText = smartCapitalize(text)
+            val displayText = if (alreadyCased) text else smartCapitalize(text)
             // #300: the first partial replaces the same range a one-shot injection would, so a
             // ranged selection is overwritten instead of the partial landing in front of it. The
             // selection comes off the destination, which applies the WebView select-all correction
@@ -2599,7 +2619,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
             }
             streamingSession = StreamingPreviewSession(
                 candidate, write.span.insertionStart, write.span.previousLength, write.span.replacedText, text, now,
+                trace = write.span.trace,
             )
+            scheduleCaretNudgeAfterLanding(candidate, write.updatedText)
             return
         }
 
@@ -2614,13 +2636,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
             session.node.isEditable,
             session.node.isFocused,
         )
-        val displayText = smartCapitalize(text)
+        val displayText = if (alreadyCased) text else smartCapitalize(text)
         // #144: recomputed rather than remembered, and deliberately safe to recompute -- the
         // character it reads sits before insertionStart, upstream of the span being rewritten, so
         // it's identical on every partial of the session.
-        val write = composeStreamingPartial(current, session.insertionStart, session.lastPartialLength, displayText)
+        val write = composeTracedStreamingPartial(current, session.insertionStart, session.lastPartialLength, session.trace, displayText)
         if (!setNodeText(session.node, write.updatedText)) { endStreamingSession(); return }
         session.lastPartialLength = write.trackedLength
+        session.trace = write.trace
+        scheduleCaretNudgeAfterLanding(session.node, write.updatedText)
         session.lastInjectedText = text
         session.lastInjectedAtMs = now
     }
@@ -2634,11 +2658,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
      * start once recording stops and cleanup actually produces a candidate (see [beginPreview]).
      * Not touchable, since there's nothing to commit yet at this stage.
      */
-    private fun updateLivePreviewBubble(text: String, nowMs: Long) {
+    private fun updateLivePreviewBubble(text: String, nowMs: Long, alreadyCased: Boolean = false) {
         if (!shouldInjectPartial(text, lastBubblePartialText, lastBubblePartialAtMs, nowMs, STREAMING_PARTIAL_MIN_INTERVAL_MS)) return
         lastBubblePartialText = text
         lastBubblePartialAtMs = nowMs
-        val displayText = smartCapitalize(text)
+        val displayText = if (alreadyCased) text else smartCapitalize(text)
         val truncated = displayText.take(PREVIEW_PREVIEW_CHARS)
         val suffix = if (displayText.length > truncated.length) "…" else ""
         showFeedback("$truncated$suffix", STREAMING_PARTIAL_MIN_INTERVAL_MS * 3, touchable = false)
@@ -2661,6 +2685,26 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     private fun refreshNode(node: AccessibilityNodeInfo): Boolean =
         AccessibilityTextDestination(node).refresh()
+
+    private var partialCaretNudge: Runnable? = null
+
+    /**
+     * The caret nudge that used to ride directly behind every ACTION_SET_TEXT, moved to after the
+     * write has been seen to land. Sent immediately it raced a Compose field's recomposition and
+     * made the field re-apply its stale value -- silently undoing the write. Only the newest
+     * partial's nudge is kept; a session that ended in the meantime skips it.
+     */
+    private fun scheduleCaretNudgeAfterLanding(node: AccessibilityNodeInfo, expected: String) {
+        partialCaretNudge?.let(handler::removeCallbacks)
+        val nudge = Runnable {
+            partialCaretNudge = null
+            if (streamingSession?.node !== node) return@Runnable
+            val destination = AccessibilityTextDestination(node)
+            if (destination.refresh() && destination.readText() == expected) destination.placeCaretAtEnd(expected.length)
+        }
+        partialCaretNudge = nudge
+        handler.postDelayed(nudge, PARTIAL_CARET_NUDGE_DELAY_MS)
+    }
 
     private fun endStreamingSession() {
         streamingSession?.let { restoreReplacedSelection(it); it.node.recycle() }
@@ -3224,7 +3268,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private fun tryCloseStreamingSpan(node: AccessibilityNodeInfo, session: StreamingPreviewSession, text: String): TextCommitResult =
         DictationTextWriter.commitClosingStreamingSpan(
             AccessibilityTextDestination(node),
-            StreamingSpan(session.insertionStart, session.lastPartialLength, session.replacedText),
+            StreamingSpan(session.insertionStart, session.lastPartialLength, session.replacedText, session.trace),
             text,
         )
 
@@ -3235,7 +3279,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private fun clearStreamingLeftover(session: StreamingPreviewSession) {
         DictationTextWriter.clearStreamingSpan(
             AccessibilityTextDestination(session.node),
-            StreamingSpan(session.insertionStart, session.lastPartialLength, session.replacedText),
+            StreamingSpan(session.insertionStart, session.lastPartialLength, session.replacedText, session.trace),
         )
     }
 

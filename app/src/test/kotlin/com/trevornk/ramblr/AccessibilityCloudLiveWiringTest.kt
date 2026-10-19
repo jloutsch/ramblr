@@ -222,17 +222,113 @@ class AccessibilityCloudLiveWiringTest {
             .apply { isAccessible = true }
         val listener = listenerField.get(service) as RuntimeListener
 
-        listener.onCloudLiveInterim("hello from cloud live")
+        listener.onCloudLiveInterim("Hello from Cloud Live, I think")
         shadowOf(Looper.getMainLooper()).idle()
 
         val feedbackViewField = WhisperAccessibilityService::class.java.getDeclaredField("feedbackView")
             .apply { isAccessible = true }
         val feedbackView = feedbackViewField.get(service) as android.widget.TextView
         assertEquals(
-            "the interim must land in the same feedback surface local streaming partials use",
-            "Hello from cloud live",
+            "the interim must land in the same feedback surface local streaming partials use, " +
+                "shown as Gemini cased it (not run through the ALL-CAPS-model smartCapitalize)",
+            "Hello from Cloud Live, I think",
             feedbackView.text.toString(),
         )
+    }
+
+    /** Shared setup: a service with overlays attached and the state machine in RECORDING. */
+    private fun recordingServiceWithOverlay(): Pair<TestService, RuntimeListener> {
+        val service = build()
+        WhisperAccessibilityService::class.java.getDeclaredMethod("showOverlay")
+            .apply { isAccessible = true }.invoke(service)
+        val runtime = runtimeField(service)
+        val stateMachine = DictationRuntime::class.java.getDeclaredField("stateMachine")
+            .apply { isAccessible = true }.get(runtime) as RecordingStateMachine
+        assertTrue(stateMachine.tryStartRecording())
+        val listener = WhisperAccessibilityService::class.java.getDeclaredField("runtimeListener")
+            .apply { isAccessible = true }.get(service) as RuntimeListener
+        return service to listener
+    }
+
+    private fun feedbackText(service: WhisperAccessibilityService): String =
+        (WhisperAccessibilityService::class.java.getDeclaredField("feedbackView")
+            .apply { isAccessible = true }.get(service) as android.widget.TextView).text.toString()
+
+    /**
+     * Live preview OFF must mean the field is untouched until the final text. Cloud Live interims
+     * used to be written into the focused field regardless of that setting (~95 writes during one
+     * dictation on a Fold, none of which the user asked for). With the setting off and
+     * preview-before-insert off they now surface in the feedback bubble only.
+     */
+    @Test
+    fun `with live preview off a cloud-live interim goes to the bubble, never the field`() {
+        PreviewBeforeInjectToggle.setEnabled(app, false)
+        prefs().edit().putBoolean("streaming_preview_enabled", false).apply()
+        val (service, listener) = recordingServiceWithOverlay()
+
+        listener.onCloudLiveInterim("Hello from cloud live")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertEquals("Hello from cloud live", feedbackText(service))
+    }
+
+    /** smartCapitalize exists for the on-device model's unpunctuated ALL-CAPS partials. Gemini's
+     *  interims are already cased: lowercasing them turned "I", names and acronyms into mush. */
+    @Test
+    fun `a cloud-live interim keeps the casing Gemini gave it`() {
+        PreviewBeforeInjectToggle.setEnabled(app, false)
+        prefs().edit().putBoolean("streaming_preview_enabled", false).apply()
+        val (service, listener) = recordingServiceWithOverlay()
+
+        listener.onCloudLiveInterim("Then I told Wyatt that Q3 is up 12%")
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("Then I told Wyatt that Q3 is up 12%", feedbackText(service))
+    }
+
+    @Test
+    fun `a local streaming partial is still smart-capitalized`() {
+        PreviewBeforeInjectToggle.setEnabled(app, false)
+        prefs().edit().putBoolean("streaming_preview_enabled", false).apply()
+        val (service, _) = recordingServiceWithOverlay()
+
+        service.maybeInjectPartial("THEN I TOLD WYATT", requireRecording = false)
+        shadowOf(Looper.getMainLooper()).idle()
+        assertEquals("Then i told wyatt", feedbackText(service))
+    }
+
+    @Test
+    fun `with live preview on a cloud-live interim is written to the field, not the bubble`() {
+        PreviewBeforeInjectToggle.setEnabled(app, false)
+        prefs().edit().putBoolean("streaming_preview_enabled", true).apply()
+        val (service, listener) = recordingServiceWithOverlay()
+
+        listener.onCloudLiveInterim("hello from cloud live")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        // No focused node exists under Robolectric, so the field write is a no-op -- the point is
+        // that the bubble stays out of it.
+        assertFalse(feedbackText(service).contains("hello from cloud live", ignoreCase = true))
+    }
+
+    /**
+     * Cloud-only user (no streaming model installed, Cloud Live on): the Live preview setting must
+     * be enableable without a model, and once on the interims reach the field, not the bubble.
+     */
+    @Test
+    fun `cloud-only user with live preview on and no streaming model gets interims in the field`() {
+        PreviewBeforeInjectToggle.setEnabled(app, false)
+        configureFullyEnabledCloudLive()
+        assertTrue(canEnableLivePreview(
+            streamingModelInstalled = ModelDownloader.isInstalled(app, STREAMING_MODEL_CATALOG.first()),
+            cloudLiveEnabled = CloudLiveToggle.isEnabled(app),
+        ))
+        prefs().edit().putBoolean("streaming_preview_enabled", true).apply()
+        val (service, listener) = recordingServiceWithOverlay()
+
+        listener.onCloudLiveInterim("hello from cloud live")
+        shadowOf(Looper.getMainLooper()).idle()
+
+        assertFalse(feedbackText(service).contains("hello from cloud live", ignoreCase = true))
     }
 
     @Test
