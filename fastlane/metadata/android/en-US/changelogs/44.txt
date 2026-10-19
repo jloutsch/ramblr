@@ -1,0 +1,6 @@
+Dictation lands cleanly in more apps, and long-press is reliable.
+
+- Fixed final text sometimes not replacing the live preview (leaving rough text or duplicated words) in apps with modern text fields. Ramblr now checks that the text landed, retries once, and keeps it on the clipboard if it can't.
+- Live preview can be turned on with Cloud Live alone, no on-device model download needed. With it off, live text shows in the bubble instead of the field.
+- Cleaner Cloud Live preview text: fixed words running together and wrong capitalization.
+- Long-pressing the floating icon no longer starts a recording when your thumb moves slightly.
