@@ -55,6 +55,12 @@ class RamblrImeService : InputMethodService() {
      *  SharedPreferences only keeps a weak reference to its listeners. */
     private val stylePrefsListener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
         if (key in STYLE_PREF_KEYS) refreshPanelChrome()
+        if (key == KeyboardTheme.KEY) {
+            // Settings changed the theme. Rebuilding a window that is on screen leaves it measured
+            // at the old size (bottom row squashed), so do it only while hidden -- or on the next hide.
+            themeRebuildPending = true
+            if (!isInputViewShown) applyPendingThemeRebuild()
+        }
     }
     private var editorPolicy = ImeEditorPolicy(allowsDictation = false, allowsRetention = false)
     /** #284: the bound editor is a secure (password/PIN) one. Distinct from `!allowsDictation`,
@@ -68,7 +74,13 @@ class RamblrImeService : InputMethodService() {
     private var micProgress: CircularProgressIndicator? = null
     private var panelRoot: View? = null
     /** The keyboard theme the current input view was built with, to notice a change in Settings. */
-    private var inflatedTheme: KeyboardTheme? = null
+    private var themeRebuildPending = false
+
+    private fun applyPendingThemeRebuild() {
+        if (!themeRebuildPending) return
+        themeRebuildPending = false
+        if (panelRoot != null) rebuildPanel()
+    }
     /** Set while the picker shows the off-device consent question: what to do on "Allow". */
     private var pendingConsent: (() -> Unit)? = null
     private var lastRenderedState: ImeUiState? = null
@@ -129,7 +141,7 @@ class RamblrImeService : InputMethodService() {
         // Discard any previous wrapper: on a uiMode change Android recreates the input view, and a
         // cached wrapper would still hold the old night-mode resources.
         inflationContext = null
-        inflatedTheme = KeyboardTheme.current(this)
+        themeRebuildPending = false
         val context = panelContext()
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -350,8 +362,6 @@ class RamblrImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         editorIdentity = identityOf(info)
-        // A theme changed in Settings applies the next time the keyboard opens.
-        if (inflatedTheme != null && inflatedTheme != KeyboardTheme.current(this)) rebuildPanel()
         editorPolicy = imeEditorPolicy(editorIdentity.inputType, editorIdentity.imeOptions)
         secureEditorBound = !editorPolicy.allowsDictation
         if (editorPolicy.allowsDictation) {
@@ -387,6 +397,7 @@ class RamblrImeService : InputMethodService() {
         loseLifecycle(ImeLifecycleLoss.HIDDEN)
         holdProcessForDetachedTranscription()
         super.onWindowHidden()
+        applyPendingThemeRebuild()
     }
 
     override fun onWindowShown() {

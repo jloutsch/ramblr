@@ -178,7 +178,7 @@ internal class ImeStylePickerView(
                     if (model.selectedCode == null) R.string.ime_style_selected_desc else R.string.ime_translate_original_desc, original,
                 ),
             ) { onPickTranslation(null) },
-            LayoutParams(-2, dp(48)),
+            LayoutParams(-2, dp(48)).apply { marginEnd = dp(6) },
         )
         for (language in model.languages) {
             val selected = language.code == model.selectedCode
@@ -189,7 +189,7 @@ internal class ImeStylePickerView(
                         if (selected) R.string.ime_translate_selected_desc else R.string.ime_translate_choice_desc, language.englishName,
                     ),
                 ) { onPickTranslation(language) },
-                LayoutParams(-2, dp(48)),
+                LayoutParams(-2, dp(48)).apply { marginEnd = dp(6) },
             )
         }
         translateChips.addView(
@@ -197,7 +197,7 @@ internal class ImeStylePickerView(
                 label = context.getString(R.string.ime_translate_languages_chip), selected = false,
                 description = context.getString(R.string.ime_translate_languages_desc),
             ) { onEditLanguages() },
-            LayoutParams(-2, dp(48)),
+            LayoutParams(-2, dp(48)).apply { marginEnd = dp(6) },
         )
     }
 

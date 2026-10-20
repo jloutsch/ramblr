@@ -173,7 +173,8 @@ internal class ImePanelController(
      *  the runtime then does not measure loudness at all. */
     private val renderLevel: ((Float) -> Unit)? = null,
     /** In-panel text for a dictation that asked for a translation and still failed cleanup, so the
-     *  generic "cleanup failed" notice does not hide that it was the translation. */
+     *  generic "cleanup failed" notice does not hide that it was the translation. Shown only when
+     *  nothing more specific was reported for the dictation. */
     private val translationFailedMessage: String = "Translation failed — inserted untranslated text",
 ) {
     private var active = true
@@ -380,7 +381,12 @@ internal class ImePanelController(
                 else "Text could not be inserted"
             )
         } else if (cleanupError != null) {
-            notice(if (dictationTranslation != null) translationFailedMessage else "Cleanup failed — inserted raw transcript")
+            // A translating dictation that already got a more specific message this round (e.g.
+            // "Not translated: needs a cloud provider") keeps it; the generic failure would hide it.
+            notice(
+                if (dictationTranslation == null) "Cleanup failed — inserted raw transcript"
+                else lastMessage ?: translationFailedMessage,
+            )
         }
     }
 

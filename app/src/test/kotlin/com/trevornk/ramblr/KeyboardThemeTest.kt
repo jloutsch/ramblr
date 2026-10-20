@@ -8,7 +8,9 @@ import android.view.inputmethod.EditorInfo
 import androidx.core.graphics.ColorUtils
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import android.os.Looper
 import org.junit.Test
+import org.robolectric.Shadows.shadowOf
 import org.junit.runner.RunWith
 import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
@@ -69,12 +71,13 @@ class KeyboardThemeTest {
 
     @Test
     @Config(sdk = [34])
-    fun `a theme changed in Settings applies the next time the keyboard opens`() {
+    fun `a theme changed in Settings rebuilds the hidden panel, ready for the next time it opens`() {
         val (service, first) = panel()
         assertTrue(surfaceLuminance(first) > 0.7)
 
+        // Settings is in front, so the keyboard window is not shown when the preference changes.
         KeyboardTheme.set(app, KeyboardTheme.DARK)
-        service.onStartInputView(editor, false)
+        shadowOf(Looper.getMainLooper()).idle()
 
         val rebuilt = service.panelRootForTest()!!
         assertTrue("the panel is rebuilt, not repainted in place", rebuilt !== first)

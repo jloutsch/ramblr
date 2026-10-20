@@ -84,7 +84,7 @@
     <string name="keyboard_theme_light">Light</string>
     <string name="keyboard_theme_dark">Dark</string>
     <string name="keyboard_translation_languages_title">Translation languages</string>
-    <string name="keyboard_translation_languages_none">None yet. Pick languages to translate into from the keyboard\'s style picker</string>
+    <string name="keyboard_translation_languages_none">None yet. Choose the languages the keyboard offers under Translate to</string>
     <string name="keyboard_translation_languages_dialog">Translate into</string>
     <string name="keyboard_translation_languages_save">Save</string>
     <string name="keyboard_cancel">Cancel</string>

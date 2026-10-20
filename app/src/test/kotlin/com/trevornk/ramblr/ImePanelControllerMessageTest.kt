@@ -122,6 +122,19 @@ class ImePanelControllerMessageTest {
         assertEquals("Translation failed", ui.messages.last())
     }
 
+    @Test fun `a more specific translation message is not replaced by the generic failure`() {
+        val ui = Ui()
+        val listener = controller(ui).listener
+        ui.translation = "German"
+        listener.onRecordingStartRequested()
+
+        listener.onUserMessage("Not translated: translation needs a cloud AI provider")
+        listener.deliverText("hello", rawText = null, paidFallbackGroup = null, cleanupError = "no key", feedbackDurationMs = 0)
+        listener.onIdleUi()
+
+        assertEquals("Not translated: translation needs a cloud AI provider", ui.messages.last())
+    }
+
     @Test fun `the level meter runs only when the panel asked for it`() {
         val ui = Ui()
         assertFalse(controller(ui, withLevels = false).listener.wantsAudioLevel())
