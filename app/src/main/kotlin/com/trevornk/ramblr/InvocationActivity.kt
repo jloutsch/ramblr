@@ -50,7 +50,6 @@ class InvocationActivity : BaseSettingsActivity() {
     private lateinit var voiceKeyboardSectionSub: TextView
     private lateinit var voiceKeyboardRowSub: TextView
     private lateinit var keyboardThemeRowSub: TextView
-    private lateinit var translationLanguagesRowSub: TextView
 
     /** The two screens this activity's rows are split across (see [EXTRA_SECTION]), as with
      *  BehaviorActivity: every row is built and refreshed on every launch, only the requested
@@ -113,14 +112,6 @@ class InvocationActivity : BaseSettingsActivity() {
         }
         keyboardThemeRowSub = keyboardThemeRow.findViewWithTag("subtitle")
         keyboard.addView(keyboardThemeRow)
-
-        // Which languages the keyboard's style picker offers under "Translate to". Translating
-        // works with cleanup off, so this lives with the keyboard rather than under Cleanup.
-        val translationLanguagesRow = settingsRow(getString(R.string.keyboard_translation_languages_title), KeyboardTranslation.summary(this)) {
-            promptTranslationLanguages()
-        }
-        translationLanguagesRowSub = translationLanguagesRow.findViewWithTag("subtitle")
-        keyboard.addView(translationLanguagesRow)
 
         // The floating ring's own on/off switch lives on the Floating icon screen.
         shortcuts.addView(sectionHeader("How to start dictation"))
@@ -231,7 +222,6 @@ class InvocationActivity : BaseSettingsActivity() {
         voiceKeyboardSectionSub.text = invocationVoiceKeyboardSectionSubtitleText(keyboardStatus)
         voiceKeyboardRowSub.text = invocationVoiceKeyboardSubtitleText(keyboardStatus)
         keyboardThemeRowSub.text = getString(KeyboardTheme.current(this).titleRes)
-        translationLanguagesRowSub.text = KeyboardTranslation.summary(this)
     }
 
     /** The voice keyboard follows the system's dark mode unless told otherwise; it picks the
@@ -244,23 +234,6 @@ class InvocationActivity : BaseSettingsActivity() {
                 KeyboardTheme.set(this, themes[which])
                 refresh()
                 dialog.dismiss()
-            }
-            .setNegativeButton(R.string.keyboard_cancel, null)
-            .show()
-    }
-
-    /** Which languages get a chip under "Translate to" in the keyboard's style picker. */
-    private fun promptTranslationLanguages() {
-        val all = KeyboardTranslation.ALL
-        val chosen = KeyboardTranslation.chosen(this).map { it.code }.toSet()
-        val checked = BooleanArray(all.size) { all[it].code in chosen }
-        val labels = all.map { if (it.nativeName == it.englishName) it.englishName else "${it.englishName} (${it.nativeName})" }
-        android.app.AlertDialog.Builder(this)
-            .setTitle(R.string.keyboard_translation_languages_dialog)
-            .setMultiChoiceItems(labels.toTypedArray(), checked) { _, which, isChecked -> checked[which] = isChecked }
-            .setPositiveButton(R.string.keyboard_translation_languages_save) { _, _ ->
-                KeyboardTranslation.setChosen(this, all.filterIndexed { i, _ -> checked[i] }.map { it.code })
-                refresh()
             }
             .setNegativeButton(R.string.keyboard_cancel, null)
             .show()

@@ -857,9 +857,8 @@ class RamblrImeService : InputMethodService() {
 
     private fun onPickerEditLanguages() {
         closeStylePicker()
-        startActivity(
-            InvocationActivity.intent(this, InvocationActivity.Section.KEYBOARD).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
-        )
+        // The language list lives under AI cleanup > Translation (shared with the floating icon).
+        startActivity(Intent(this, CleanupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     private fun actionButton(icon: Int, description: Int, onLongPress: (() -> Unit)? = null, action: () -> Unit): ImageButton =

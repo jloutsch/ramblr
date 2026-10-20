@@ -2,16 +2,20 @@ package com.trevornk.ramblr
 
 import android.content.Context
 
-/** A language the keyboard can translate dictation into. [englishName] goes into the AI prompt;
- *  [nativeName] is what the keyboard chip shows. */
+/** A language dictation can be translated into. [englishName] goes into the AI prompt;
+ *  [nativeName] is what the keyboard chip and the floating icon's menu show; [code] (upper-cased)
+ *  is the badge on the floating icon. */
 internal data class TranslationLanguage(val code: String, val englishName: String, val nativeName: String)
 
 /**
- * Keyboard-only translation: the user picks a handful of languages in Settings, and the keyboard's
- * style picker shows one chip per language next to "Original". The chosen target applies to
- * dictations started from the keyboard only; the floating icon never translates. Translation is
- * done by a cloud cleanup step ([KeyboardTranslationRouting]), so it needs a cloud AI provider
- * (on-device cleanup models are too small for it and ignore the prompt).
+ * Dictation translation: the user picks a handful of languages in Settings (AI cleanup), and both
+ * the keyboard's style picker and the floating icon's long-press menu show one chip per language
+ * next to "Original". The chosen target (one shared preference) applies to every dictation that
+ * is inserted into a text field: those started from the keyboard and those started from the
+ * floating icon. It does NOT apply to Process-text, shared audio files or any other background
+ * transcription. Translation is done by a cloud cleanup step ([KeyboardTranslationRouting]), so it
+ * needs a cloud AI provider (on-device cleanup models are too small for it and ignore the prompt).
+ * The class and preference names keep their original "keyboard" wording so nothing is migrated.
  */
 internal object KeyboardTranslation {
     private const val PREFS_NAME = "ramblr"
@@ -69,7 +73,7 @@ internal object KeyboardTranslation {
         editor.apply()
     }
 
-    /** The language keyboard dictations are translated into, or null for "Original". */
+    /** The language dictations are translated into (keyboard and floating icon), or null for "Original". */
     fun target(context: Context): TranslationLanguage? {
         val code = prefs(context).getString(KEY_TARGET, null) ?: return null
         return chosen(context).firstOrNull { it.code == code }
@@ -78,6 +82,9 @@ internal object KeyboardTranslation {
     fun setTarget(context: Context, code: String?) {
         prefs(context).edit().apply { if (code == null) remove(KEY_TARGET) else putString(KEY_TARGET, code) }.apply()
     }
+
+    /** The short label for the floating icon's badge, e.g. "ES". */
+    fun badgeText(language: TranslationLanguage): String = language.code.uppercase()
 
     /** Settings row summary. */
     fun summary(context: Context): String {

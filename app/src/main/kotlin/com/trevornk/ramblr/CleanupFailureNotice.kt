@@ -99,11 +99,15 @@ object CleanupFailureNotice {
      *    "· tap to copy again" affordance for this case, so this stays terse to avoid saying it
      *    twice.
      */
-    fun messageFor(method: InjectMethod, error: String?): String {
+    fun messageFor(method: InjectMethod, error: String?, translating: Boolean = false): String {
         val reason = summarize(error)
+        // A translating dictation that failed names the translation, not "cleanup": the user asked
+        // for another language and got the spoken one.
+        val what = if (translating) "Translation" else "Cleanup"
+        val inserted = if (translating) "inserted untranslated text" else "inserted raw text"
         return when (method) {
-            InjectMethod.NONE -> "Cleanup failed ($reason)"
-            else -> "Cleanup failed ($reason) — inserted raw text"
+            InjectMethod.NONE -> "$what failed ($reason)"
+            else -> "$what failed ($reason) — $inserted"
         }
     }
 }

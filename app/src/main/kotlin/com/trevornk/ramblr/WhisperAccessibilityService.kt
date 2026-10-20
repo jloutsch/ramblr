@@ -303,6 +303,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
         /** Clipboard-fallback feedback stays up much longer than a normal success bubble (#5): it's
          *  the only record the user gets that injection didn't happen, so it shouldn't be easy to miss. */
         private const val FALLBACK_FEEDBACK_DURATION_MS = 6000L
+        /** The "Not translated: ..." bubble is a sentence naming where to fix it, so it stays up
+         *  longer than a routine confirmation. */
+        private const val TRANSLATION_NOTICE_DURATION_MS = 5000L
         /** How long a pending preview (#40) waits for an explicit commit tap before it auto-resolves
          *  to the raw transcript — long enough to read a short dictation, short enough that a
          *  distracted user isn't left staring at an un-injected bubble for too long. */
@@ -319,6 +322,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
          *  from a routine success bubble instead of looking identical. */
         private const val COLOR_FEEDBACK_FALLBACK_BG = 0xEEB45309.toInt()
         private const val COLOR_RING = 0xFFE8EAED.toInt()
+        /** Chips per row of the style menu's "Translate to" section. */
+        private const val TRANSLATE_CHIPS_PER_ROW = 3
+        /** Fill of the translation language badge on the ring. */
+        private const val COLOR_TRANSLATE_BADGE = 0xFF2563EB.toInt()
         /** Busy-ring tint while cleanup runs (#294) -- the same emerald as [COLOR_CLEANUP_ON], so the
          *  ring matches the style menu's "Cleanup: On" row. */
         private const val COLOR_RING_CLEANING = 0xFF34D399.toInt()
@@ -365,6 +372,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
             flushPendingStreamingHandoff()
             lastBubblePartialText = null
             lastBubblePartialAtMs = 0L
+            // The previous dictation's translation bookkeeping (and any unshown skip notice) ends
+            // with it; a new dictation asks again when its cleanup starts.
+            translationRequested = false
+            translationUnavailable = false
+            pendingTranslationNotice = null
         }
 
         override fun onRecordingStartFailed() {
@@ -486,6 +498,24 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         override fun foregroundPackageName(): String? = currentForegroundPackageName()
 
+        // "Translate to" is shared with the keyboard (one preference), so a dictation started from
+        // the floating icon translates into the same language. Read once, when cleanup starts.
+        override fun translationTarget(): String? {
+            val target = KeyboardTranslation.target(this@WhisperAccessibilityService)?.englishName
+            translationRequested = target != null
+            return target
+        }
+
+        // The ring has no panel: the reason goes in the floating bubble (shown with the insert, see
+        // finishInjection), not a toast, and the dictation is inserted untranslated.
+        override fun onTranslationUnavailable(consentMissing: Boolean): Boolean {
+            translationUnavailable = true
+            pendingTranslationNotice = getString(
+                if (consentMissing) R.string.ring_translate_unavailable_consent else R.string.ring_translate_unavailable_cloud,
+            )
+            return true
+        }
+
         // #284: a dictation that ended with no text. Only worth a notification when the user can
         // no longer see the field it was for; otherwise the runtime's own toast is the whole story.
         override fun onDictationFailed(failure: BackgroundFailure) {
@@ -501,6 +531,13 @@ open class WhisperAccessibilityService : AccessibilityService() {
     internal class DictationTarget(val packageName: String, val node: AccessibilityNodeInfo?)
 
     internal var dictationTarget: DictationTarget? = null
+
+    /** Translation bookkeeping for the in-flight dictation (see [runtimeListener]): a target was
+     *  requested when cleanup started, the route could not carry it out, and the bubble text that
+     *  says why. Written on the cleanup thread, read on the main thread. */
+    @Volatile private var translationRequested = false
+    @Volatile private var translationUnavailable = false
+    @Volatile internal var pendingTranslationNotice: String? = null
 
     private val backgroundSink by lazy {
         BackgroundResultSink(
@@ -671,6 +708,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
         ).also { runtimeInstance = it }
 
     private var overlayView: FrameLayout? = null
+    /** The "ES"-style badge on the ring while a translate target is set; null before the overlay exists. */
+    internal var translationBadge: TextView? = null
     private var button: ImageView? = null
     private var spinner: ProgressBar? = null
     /** True while the busy ring shows the cleanup phase (#294). Main thread only. */
@@ -1008,6 +1047,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
         ringModePrefsListener?.let { prefs.unregisterOnSharedPreferenceChangeListener(it) }
         val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
             if (key == RingVisibilityMode.KEY) onRingVisibilityModeChanged()
+            // The keyboard (or Settings) changed the shared "Translate to" choice: keep the badge true.
+            if (key == KeyboardTranslation.KEY_TARGET || key == KeyboardTranslation.KEY_LANGUAGES) refreshTranslationBadge()
         }
         ringModePrefsListener = listener
         prefs.registerOnSharedPreferenceChangeListener(listener)
@@ -1154,6 +1195,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
             // of in the transparent margin around it.
             addView(ring, FrameLayout.LayoutParams(buttonSize, buttonSize, Gravity.CENTER))
         }
+        // Language badge ("ES") while a "Translate to" target is set. A child of the same ring
+        // window, so it never changes the window size or touch area, and it is not clickable so
+        // touches fall through to the ring's own listener. GONE (and absent from layout) when the
+        // target is Original; see [refreshTranslationBadge].
+        val badge = buildTranslationBadge(ringSizeDp)
+        overlay.addView(badge, FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+            Gravity.BOTTOM or Gravity.END,
+        ))
 
         val params = WindowManager.LayoutParams(
             ringSize, ringSize,
@@ -1432,6 +1482,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
             overlayView = overlay
             button = img
             spinner = ring
+            translationBadge = badge
+            refreshTranslationBadge()
             layoutParams = params
             wm.addView(feedback, feedbackParams)
             feedbackView = feedback
@@ -1731,6 +1783,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         prePeekX = params.x
         isPeeked = true
+        refreshTranslationBadge()
         Log.i(TAG, "Peeking ring: x=${params.x} -> $targetX (sliver ${peekVisiblePx}px, inset ${ringInsetPx()}px)")
         animateRingX(params, wm, targetX)
     }
@@ -1763,6 +1816,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
         isPeeked = false
         prePeekX = null
+        refreshTranslationBadge()
         Log.i(TAG, "Restoring ring from peek: x=${params.x} -> $targetX")
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         animateRingX(params, wm, targetX)
@@ -1863,6 +1917,46 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Builds the (initially hidden) translation badge. Readable at the default 56dp ring: bold
+     * white caps on a solid blue pill with a thin white edge, so it reads on any ring colour,
+     * custom icon or app background; the text size scales with the ring size setting. It sits on
+     * the ring's lower-right corner, inside the ring window.
+     */
+    private fun buildTranslationBadge(ringSizeDp: Int): TextView = TextView(this).apply {
+        textSize = (10f * ringSizeDp / RING_DP).coerceIn(9f, 14f)
+        setTextColor(0xFFFFFFFF.toInt())
+        typeface = android.graphics.Typeface.DEFAULT_BOLD
+        gravity = Gravity.CENTER
+        includeFontPadding = false
+        isClickable = false
+        isFocusable = false
+        val h = (4 * dp).toInt(); val v = (2 * dp).toInt()
+        setPadding(h, v, h, v)
+        background = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadius = 8 * dp
+            setColor(COLOR_TRANSLATE_BADGE)
+            setStroke((1 * dp).toInt().coerceAtLeast(1), 0xFFFFFFFF.toInt())
+        }
+        visibility = View.GONE
+    }
+
+    /** Shows the badge with the chosen language's code while a target is set; hides it for
+     *  Original, and while the ring is peeked (only a sliver of the ring is on screen then, and a
+     *  badge on it would be clipped clutter). Main thread. */
+    internal fun refreshTranslationBadge() {
+        val badge = translationBadge ?: return
+        val target = KeyboardTranslation.target(this)
+        if (target == null || isPeeked) {
+            badge.visibility = View.GONE
+            return
+        }
+        badge.text = KeyboardTranslation.badgeText(target)
+        badge.contentDescription = getString(R.string.ring_translate_badge_desc, target.englishName)
+        badge.visibility = View.VISIBLE
+    }
+
     private fun removeOverlay() {
         // Cancel any in-flight peek/restore animation first (M2): its per-frame update listener
         // calls wm.updateViewLayout(overlay, …), which throws IllegalArgumentException ("View not
@@ -1899,6 +1993,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
         button = null
         spinner = null
+        translationBadge = null
         layoutParams = null
         feedbackLayoutParams = null
     }
@@ -2319,6 +2414,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         container.addView(styleMenuDivider())
 
+        addTranslateSection(container)
+
+        container.addView(styleMenuDivider())
+
         val streamingEnabled = isLivePreviewOn(
             settingEnabled = prefs().getBoolean("streaming_preview_enabled", false),
             streamingModelInstalled = ModelDownloader.isInstalled(this, selectedStreamingModel()),
@@ -2350,6 +2449,102 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
 
         return container
+    }
+
+    /**
+     * "Translate to" in the long-press menu: Original plus the languages chosen in Settings, the
+     * same shared choice the keyboard's style picker shows (one preference, so they never
+     * disagree). Picking applies to the NEXT dictation. While a dictation is in flight (recording,
+     * transcribing or cleaning -- the runtime is not IDLE) the chips are shown dimmed and do
+     * nothing, so a translation can't change under a dictation that already started.
+     */
+    private fun addTranslateSection(container: LinearLayout) {
+        val model = CleanupStyleMenu.translateModel(this)
+        val busy = runtime.currentState() != RecordingStateMachine.State.IDLE
+        if (model.languages.isEmpty()) {
+            container.addView(styleMenuRow(
+                icon = null,
+                title = getString(R.string.ring_translate_menu_title),
+                subtitle = getString(R.string.ring_translate_menu_none),
+            ) { onStyleMenuOpenCleanupSettingsTapped() })
+            return
+        }
+        container.addView(styleMenuRow(
+            icon = null,
+            title = getString(R.string.ring_translate_menu_title),
+            subtitle = getString(if (busy) R.string.ring_translate_menu_busy else R.string.ring_translate_menu_subtitle),
+        ) { /* section header: inert */ })
+
+        // (code or null for Original, label, content description)
+        val choices = buildList {
+            add(Triple<String?, String, String>(
+                null, getString(R.string.ime_translate_original), getString(R.string.ime_translate_original_desc),
+            ))
+            for (lang in model.languages) add(Triple<String?, String, String>(
+                lang.code, lang.nativeName,
+                getString(
+                    if (lang.code == model.targetCode) R.string.ime_translate_selected_desc else R.string.ime_translate_choice_desc,
+                    lang.englishName,
+                ),
+            ))
+        }
+        for (rowChoices in choices.chunked(TRANSLATE_CHIPS_PER_ROW)) {
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                setPadding((8 * dp).toInt(), (2 * dp).toInt(), (8 * dp).toInt(), (2 * dp).toInt())
+            }
+            for ((code, label, desc) in rowChoices) {
+                val selected = code == model.targetCode
+                row.addView(TextView(this).apply {
+                    text = label
+                    contentDescription = desc
+                    textSize = 13f
+                    maxLines = 1
+                    ellipsize = android.text.TextUtils.TruncateAt.END
+                    gravity = Gravity.CENTER
+                    setTextColor(if (selected) 0xFFFFFFFF.toInt() else 0xFFE0E0E0.toInt())
+                    setPadding((8 * dp).toInt(), (7 * dp).toInt(), (8 * dp).toInt(), (7 * dp).toInt())
+                    background = GradientDrawable().apply {
+                        shape = GradientDrawable.RECTANGLE
+                        cornerRadius = 8 * dp
+                        setColor(if (selected) COLOR_TRANSLATE_BADGE else 0x26FFFFFF)
+                    }
+                    isEnabled = !busy
+                    alpha = if (busy) 0.4f else 1f
+                    isClickable = !busy
+                    if (!busy) setOnClickListener { onStyleMenuTranslateTapped(code) }
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f).apply {
+                    marginStart = (3 * dp).toInt(); marginEnd = (3 * dp).toInt()
+                })
+            }
+            // Pad a short last row so its chips keep the same width as the rows above it.
+            repeat(TRANSLATE_CHIPS_PER_ROW - rowChoices.size) {
+                row.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f).apply {
+                    marginStart = (3 * dp).toInt(); marginEnd = (3 * dp).toInt()
+                })
+            }
+            container.addView(row)
+        }
+    }
+
+    /** A "Translate to" chip: store the shared target (applies to the next dictation) and say so. */
+    private fun onStyleMenuTranslateTapped(code: String?) {
+        // The menu can outlive the moment it was built (a dictation may have started since).
+        if (runtime.currentState() != RecordingStateMachine.State.IDLE) return
+        KeyboardTranslation.setTarget(this, code)
+        dismissStyleMenu()
+        refreshTranslationBadge()
+        val language = KeyboardTranslation.byCode(code)
+        showFeedback(
+            if (language == null) getString(R.string.ime_translate_changed_off)
+            else getString(R.string.ime_translate_changed, language.englishName),
+            durationMs = 1500,
+        )
+    }
+
+    private fun onStyleMenuOpenCleanupSettingsTapped() {
+        dismissStyleMenu()
+        startActivity(Intent(this, CleanupActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
     }
 
     /**
@@ -3082,9 +3277,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val isFallback = method == InjectMethod.NONE
         fallbackClipboardText = if (isFallback) text else null
 
+        // The skip reason for this dictation's translation, if any. Consumed here so it shows once,
+        // with this dictation's insert.
+        val translationNotice = pendingTranslationNotice
+        pendingTranslationNotice = null
         val duration = when {
             retryRawOffered -> UNDO_RETRY_WINDOW_MS
             isFallback -> FALLBACK_FEEDBACK_DURATION_MS
+            // Long enough to read the reason (it is a sentence, not a status word).
+            translationNotice != null -> maxOf(feedbackDurationMs, TRANSLATION_NOTICE_DURATION_MS)
             else -> feedbackDurationMs
         }
         // retryRawOffered replaces the base feedback text entirely rather than appending a suffix
@@ -3097,11 +3298,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val resolvedFeedback = injectionFeedbackFor(method, feedback)
         // #175: a cleanup-failure fall-through resolves its own message here, where `method` --
         // and therefore what the clipboard actually holds -- is finally known.
-        val baseFeedback = cleanupError?.let { CleanupFailureNotice.messageFor(method, it) } ?: resolvedFeedback
+        // A translating dictation whose cloud call failed says so ("Translation failed"), not the
+        // generic cleanup wording; one that never ran (no key/consent) carries its own notice.
+        val translationFailed = translationRequested && !translationUnavailable
+        val baseFeedback = cleanupError?.let { CleanupFailureNotice.messageFor(method, it, translating = translationFailed) }
+            ?: resolvedFeedback
         val displayFeedback = when {
             retryRawOffered -> "Tap to use raw text"
-            isFallback -> baseFeedback?.let { "$it · tap to copy again" }
-            else -> baseFeedback
+            isFallback -> (translationNotice ?: baseFeedback)?.let { "$it · tap to copy again" }
+            else -> translationNotice ?: baseFeedback
         }
         // #120: bias the bubble away from overlapping the field it just injected into, when that
         // node's on-screen bounds are known (DIRECT injections only -- that's the only path with

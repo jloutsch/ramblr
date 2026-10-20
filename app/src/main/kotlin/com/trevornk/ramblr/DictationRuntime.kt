@@ -96,10 +96,18 @@ interface RuntimeListener {
     /** Whether this host/session permits retention of transcript-bearing diagnostics. */
     fun allowsTranscriptRetention(): Boolean = true
 
-    /** The keyboard's translate setting: English name of the language this dictation should be
+    /** The "Translate to" setting: English name of the language this dictation should be
      *  translated into, or null to keep the spoken language. Read once, when cleanup starts. Only
-     *  the voice keyboard returns non-null; any thread. */
+     *  hosts that insert into a text field (the voice keyboard and the floating icon) return
+     *  non-null; any thread. */
     fun translationTarget(): String? = null
+
+    /** A requested translation could not run and the dictation goes in untranslated: the one-time
+     *  off-device consent is missing ([consentMissing]) or there is no cloud step with a key.
+     *  Return true when the host shows that itself (the floating icon's bubble); false makes the
+     *  runtime show the default message (a toast, which the keyboard mirrors into its panel).
+     *  Main thread. */
+    fun onTranslationUnavailable(consentMissing: Boolean): Boolean = false
 
     /** Whether the host animates a mic level. Only then does the recorder's reader thread measure
      *  loudness at all; the floating ring never pays for it. */
@@ -1922,7 +1930,7 @@ class DictationRuntime internal constructor(
         }
 
         val cleanupEnabled = PostProcessingToggle.shouldRunCleanup(PostProcessingToggle.isEnabled(context))
-        // Keyboard translation (see KeyboardTranslationRouting): done by the first cloud cleanup step
+        // Dictation translation, keyboard and floating icon (see KeyboardTranslationRouting): done by the first cloud cleanup step
         // that has a key -- never by an on-device step, which ignores the prompt -- and when nothing
         // can translate the dictation goes in untranslated with the reason shown in the panel.
         val requestedTranslation = listener.translationTarget()
@@ -1933,8 +1941,9 @@ class DictationRuntime internal constructor(
             hasCredential = { KeyboardTranslationReadiness.hasCredential(context, it) },
         )
         if (translationRoute is KeyboardTranslationRouting.Route.Unavailable) {
-            val message = context.getString(KeyboardTranslationRouting.messageRes(translationRoute.reason))
-            toast(message)
+            if (!listener.onTranslationUnavailable(translationRoute.reason == KeyboardTranslationRouting.Reason.CONSENT_MISSING)) {
+                toast(context.getString(KeyboardTranslationRouting.messageRes(translationRoute.reason)))
+            }
         }
         val translation = translationRoute as? KeyboardTranslationRouting.Route.Cloud
         val usePostProcessing = cleanupEnabled || translation != null

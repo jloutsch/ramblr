@@ -29,6 +29,13 @@ object CleanupStyleMenu {
         val personas: List<CleanupPersona>,
     )
 
+    /** The "Translate to" choices a menu offers: Original plus [languages], with [targetCode] the
+     *  current shared target (null = Original). Same data the keyboard's picker shows. */
+    internal data class TranslateModel(val languages: List<TranslationLanguage>, val targetCode: String?)
+
+    internal fun translateModel(context: Context): TranslateModel =
+        TranslateModel(KeyboardTranslation.chosen(context), KeyboardTranslation.target(context)?.code)
+
     enum class ToggleResult { TURNED_ON, TURNED_OFF, NEEDS_SETTINGS }
 
     data class Selection(val persona: CleanupPersona, val cleanupEnabled: Boolean)
