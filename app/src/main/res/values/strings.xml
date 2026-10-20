@@ -155,6 +155,7 @@
     <string name="audio_failure_local_unavailable">the on-device model isn\'t ready</string>
     <string name="audio_failure_transcription_failed">transcription failed</string>
     <string name="audio_failure_storage">not enough storage space</string>
+    <string name="audio_failure_too_large">file is larger than 2 GB</string>
     <string name="audio_failure_interrupted">interrupted</string>
     <string name="audio_failure_timed_out">ran out of background time</string>
 
