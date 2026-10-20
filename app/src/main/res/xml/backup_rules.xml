@@ -5,7 +5,7 @@
   this file is kept as the pre-31 fallback and because some OEM backup agents still consult it.
 
   Everything in the plain "ramblr" SharedPreferences file is safe and desirable to restore to a
-  new device: Advanced settings (auto-hide delay/toggle, peek sliver size, raw-text retry, history
+  new device: Settings (auto-hide delay/toggle, peek sliver size, raw-text retry, history
   enabled), overlay appearance, personas, provider chain ordering, and per-app persona mappings all
   live there and have zero device-specific state baked in.
 

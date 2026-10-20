@@ -11,7 +11,7 @@ import android.content.SharedPreferences
  *
  * Defaults to 2.0s -- the middle of the product owner's stated 1.5-2.5s preference range, and
  * deliberately NOT the more aggressive 1-2s range the issue explicitly warns against. Presets are
- * exposed in the Behavior settings UI; MIN/MAX bound a "custom" value entered directly, kept
+ * exposed in the Recording settings UI; MIN/MAX bound a "custom" value entered directly, kept
  * comfortably inside the same forgiving neighborhood so a fat-fingered value can't make the
  * feature useless (e.g. 0.1s stopping mid-word) or pointless (e.g. 60s never triggering in
  * practice).
@@ -23,7 +23,7 @@ object SilenceAutoStopThreshold {
     const val MIN_DECISECONDS = 10 // 1.0s floor -- below this the feature would clip live speech
     const val MAX_DECISECONDS = 50 // 5.0s ceiling -- above this it stops feeling like "auto"
 
-    /** Forgiving presets shown in the Behavior settings picker, in deciseconds (1.5s/2.0s/2.5s). */
+    /** Forgiving presets shown in the Recording settings picker, in deciseconds (1.5s/2.0s/2.5s). */
     val PRESET_DECISECONDS = listOf(15, 20, 25)
 
     fun decisecondsOrDefault(prefs: SharedPreferences): Int =

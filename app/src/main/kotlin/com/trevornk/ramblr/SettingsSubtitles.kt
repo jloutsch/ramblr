@@ -63,7 +63,7 @@ fun vocabularyMainRowSubtitleText(termCount: Int): String {
 
 /**
  * The main screen's top-level "History" row subtitle (#283). History already existed under
- * Settings > Data & Logs, but users didn't find it, so the row leads with live state: how many
+ * Settings > History, but users didn't find it, so the row leads with live state: how many
  * dictations are saved, or that the feature is off (privacy: nothing is shown or counted then,
  * and the row leads to the toggle instead of the viewer).
  */
@@ -99,7 +99,7 @@ fun cloudLiveSubtitleText(
 }
 
 /**
- * The Behavior screen's "Personal vocabulary" row subtitle: the term list itself, prefixed with
+ * The Words and snippets screen's "Personal vocabulary" row subtitle: the term list itself, prefixed with
  * the #185 inert-setting warning when nothing in the current configuration applies the terms.
  * Extracted from BehaviorActivity's private `vocabularySummary` (#217) so it's unit-testable and
  * shared through [VocabularyEditor.rowSummary].

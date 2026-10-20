@@ -121,7 +121,7 @@ class BehaviorActivity : BaseSettingsActivity() {
         })
 
         // #257: opt-in automation hook. Placed next to the other invocation-adjacent toggles
-        // rather than in Advanced, because the people who want it (automation users trying to
+        // rather than in a separate settings area, because the people who want it (automation users trying to
         // keep Ramblr out of banking apps) are looking at behavior, not internals.
         automationOffHookSwitch = MaterialSwitch(this).apply {
             isChecked = AutomationOffHookToggle.isEnabled(this@BehaviorActivity)

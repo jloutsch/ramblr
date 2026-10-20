@@ -1700,7 +1700,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     /** Any interaction with the ring (drag, tap, long-press) calls this to re-arm the idle timer,
      *  cancelling whatever peek was previously scheduled and restoring the ring if it was already
      *  peeked when the new interaction began. Delay is read fresh from [AutoPeekDelay] each call
-     *  (rather than cached) so a change in Advanced settings takes effect on the very next
+     *  (rather than cached) so a change in settings takes effect on the very next
      *  interaction, no service restart needed -- same pattern as [AutoPeekToggle]. */
     private fun armIdlePeekTimer() {
         handler.removeCallbacks(idlePeekRunnable)
@@ -1710,7 +1710,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     /** Fires once the configured [AutoPeekDelay] has elapsed with no ring interaction. Never peeks
      *  while actively recording or while cleanup/transcription is in flight (RingPeek.shouldAutoPeek),
      *  nor while the ring itself isn't currently showing (e.g. MainActivity foregrounded, #35) or
-     *  already peeked, nor at all while the user has turned auto-peek off in Advanced settings
+     *  already peeked, nor at all while the user has turned auto-peek off in settings
      *  (see [AutoPeekToggle]) -- the idle timer keeps re-arming itself in that case so the ring is
      *  ready to peek again the moment the setting is turned back on, without needing a service
      *  restart. */
@@ -2361,7 +2361,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
      * was previously one tap with no undo shown anywhere the user was already looking. The recovery
      * text has to be readable at the moment of the decision, because every channel for delivering
      * it afterwards is losable: the notification can be swiped, the toast disappears in seconds,
-     * and Settings > Behavior's restore row is invisible until you're already hidden.
+     * and Settings > Floating icon's restore row is invisible until you're already hidden.
      *
      * Built from the same [styleMenuRow]/[styleMenuDivider] primitives as the main menu so it
      * inherits the overlay's theming, touch handling and dismiss-on-outside-tap for free. An

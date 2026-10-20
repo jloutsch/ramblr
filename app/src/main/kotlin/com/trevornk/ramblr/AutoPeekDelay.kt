@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /**
  * User-configurable override for how many seconds the floating icon's normal (non-peeked)
  * feedback bubble/idle-peek timeout should wait before [WhisperAccessibilityService] auto-peeks
- * it to the edge -- exposed in Advanced settings as a plain number (seconds), converted to millis
+ * it to the edge -- exposed in settings as a plain number (seconds), converted to millis
  * at the read site. Defaults to [RingPeek.IDLE_TIMEOUT_MS] converted to seconds so existing
  * behavior doesn't change for anyone who's never touched the setting. Only meaningful while
  * [AutoPeekToggle] is on; this store doesn't gate anything itself. Backed by the same "ramblr"

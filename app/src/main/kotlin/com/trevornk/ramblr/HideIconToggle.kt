@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 
 /**
  * On-by-default toggle for whether the long-press style menu's "Hide icon" row (Feature B) is
- * offered at all. Turning this off in Advanced settings removes the menu row entirely -- it does
+ * offered at all. Turning this off in settings removes the menu row entirely -- it does
  * NOT force-restore an icon that's already hidden (see [IconHiddenState] for that separate,
  * always-available concern); it only stops new hides from being started via the long-press menu.
  * Backed by the same "ramblr" prefs file as [PerAppPersonaToggle]/[PreviewBeforeInjectToggle]

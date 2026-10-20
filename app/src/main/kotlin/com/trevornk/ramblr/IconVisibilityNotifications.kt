@@ -116,7 +116,7 @@ object IconVisibilityNotifications {
     }
 
     /** Dismisses the "icon hidden" notification, e.g. once the icon has been restored via some
-     *  other path (the Advanced screen fallback) so a stale notification doesn't linger. */
+     *  other path (the Floating icon screen fallback) so a stale notification doesn't linger. */
     fun cancel(ctx: Context) {
         try {
             NotificationManagerCompat.from(ctx).cancel(NOTIFICATION_ID)

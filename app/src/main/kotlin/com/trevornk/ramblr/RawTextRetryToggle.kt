@@ -6,7 +6,7 @@ import android.content.SharedPreferences
 /**
  * On-by-default toggle for whether a successful cleanup injection that actually changed the text
  * offers the "Tap to use raw text" undo bubble (see the `retryRawOffered` gate in
- * [WhisperAccessibilityService]'s injection-feedback logic). Turning this off in Advanced settings
+ * [WhisperAccessibilityService]'s injection-feedback logic). Turning this off in settings
  * means cleanup's normal completion feedback (or nothing, depending on [feedbackDurationMs]) shows
  * instead -- the raw transcript is simply not offered as a one-tap undo. This has no effect on the
  * clipboard-fallback "tap to copy again" bubble, which is a different code path (isFallback) than

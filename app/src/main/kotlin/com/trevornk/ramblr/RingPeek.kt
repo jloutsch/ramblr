@@ -13,11 +13,11 @@ package com.trevornk.ramblr
  */
 object RingPeek {
     /** Default idle delay in millis before the ring auto-peeks, used when the user hasn't
-     *  overridden it via [AutoPeekDelay] in Advanced settings. */
+     *  overridden it via [AutoPeekDelay] in settings. */
     const val IDLE_TIMEOUT_MS = 4_000L
 
     /** Default visible sliver size in dp once peeked, used when the user hasn't overridden it via
-     *  [PeekVisibleSize] in Advanced settings. */
+     *  [PeekVisibleSize] in settings. */
     const val PEEK_VISIBLE_DP = 20
 
     /** Duration of the slide animation in either direction. */

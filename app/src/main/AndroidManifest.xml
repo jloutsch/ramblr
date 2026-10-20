@@ -196,7 +196,7 @@
              nav-bar/floating a11y button, the a11y gesture, and volume-keys-hold invocation —
              at the cost of the INVISIBLE_TOGGLE coupling (#156), which the guard-rail banner
              covers. Disabled by default so fresh installs and updates show exactly ONE "Ramblr"
-             entry in system Settings; the Invocation screen's mode switch flips the two
+             entry in system Settings; the System shortcuts screen's mode switch flips the two
              components via PackageManager.setComponentEnabledSetting (InvocationServiceMode).
              android:label MUST differ from the floating component's (#258): system Settings only
              ever lists one of the two, but automation apps (MacroDroid/Tasker) address services
