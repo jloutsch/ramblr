@@ -85,6 +85,20 @@ class MainSettingsUiTest {
         )
     }
 
+    @Test fun `closing history opened from the main screen leaves the save toggle reachable`() {
+        val intent = DataLogsActivity.intent(RuntimeEnvironment.getApplication(), DataLogsActivity.Section.HISTORY)
+            .putExtra(DataLogsActivity.EXTRA_SHOW_HISTORY, true)
+        val activity = Robolectric.buildActivity(DataLogsActivity::class.java, intent).setup().get()
+
+        val dialog = org.robolectric.shadows.ShadowAlertDialog.getLatestAlertDialog()
+        dialog.getButton(android.content.DialogInterface.BUTTON_NEGATIVE).performClick()
+        shadowOf(android.os.Looper.getMainLooper()).idle()
+
+        assertFalse(dialog.isShowing)
+        assertFalse(activity.isFinishing)
+        assertTrue(activity.window.decorView.row("Save dictation history").isShown())
+    }
+
     @Test fun `main screen groups its rows under five task headings and has no search box`() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val root = activity.window.decorView
