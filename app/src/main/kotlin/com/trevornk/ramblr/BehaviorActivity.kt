@@ -144,7 +144,7 @@ class BehaviorActivity : BaseSettingsActivity() {
         exclusionListRowSub = exclusionListRow.findViewWithTag("subtitle")
         root.addView(exclusionListRow)
 
-        val ringVisibilityRow = settingsRow("Show the icon", ringVisibilitySummary()) { promptRingVisibility() }
+        val ringVisibilityRow = settingsRow(getString(R.string.ring_visibility_title), ringVisibilitySummary()) { promptRingVisibility() }
         ringVisibilityRowSub = ringVisibilityRow.findViewWithTag("subtitle")
         root.addView(ringVisibilityRow)
 
@@ -342,36 +342,40 @@ class BehaviorActivity : BaseSettingsActivity() {
         refresh()
     }
 
-    private fun ringVisibilityLabel(mode: RingVisibilityMode): String = when (mode) {
-        RingVisibilityMode.ALWAYS -> "Always"
-        RingVisibilityMode.KEYBOARD -> "Only while the keyboard is open"
-        RingVisibilityMode.TEXT_FIELD -> "While a text field is selected"
-    }
+    private fun ringVisibilityLabel(mode: RingVisibilityMode): String = getString(
+        when (mode) {
+            RingVisibilityMode.ALWAYS -> R.string.ring_visibility_always
+            RingVisibilityMode.KEYBOARD -> R.string.ring_visibility_keyboard
+            RingVisibilityMode.TEXT_FIELD -> R.string.ring_visibility_text_field
+        },
+    )
 
     private fun ringVisibilitySummary(): String {
-        val mode = RingVisibilityMode.read(this)
-        return when (mode) {
-            RingVisibilityMode.ALWAYS -> "Always"
-            RingVisibilityMode.KEYBOARD -> "Only while the keyboard is open"
-            RingVisibilityMode.TEXT_FIELD -> "While a text field is selected, even after you close the keyboard"
-        } + ". Never hides while you're recording"
+        val choice = getString(
+            when (RingVisibilityMode.read(this)) {
+                RingVisibilityMode.ALWAYS -> R.string.ring_visibility_always
+                RingVisibilityMode.KEYBOARD -> R.string.ring_visibility_keyboard
+                RingVisibilityMode.TEXT_FIELD -> R.string.ring_visibility_text_field_summary
+            },
+        )
+        return getString(R.string.ring_visibility_summary, choice)
     }
 
     private fun promptRingVisibility() {
         val modes = RingVisibilityMode.entries
         android.app.AlertDialog.Builder(this)
-            .setTitle("Show the icon")
+            .setTitle(R.string.ring_visibility_title)
             .setSingleChoiceItems(
                 modes.map { ringVisibilityLabel(it) }.toTypedArray(),
                 modes.indexOf(RingVisibilityMode.read(this)),
             ) { dialog, which ->
-                RingVisibilityMode.write(this, modes[which])
                 // The running service watches this preference and re-subscribes / re-lays-out the
                 // ring itself (WhisperAccessibilityService.startObservingRingMode).
+                RingVisibilityMode.write(this, modes[which])
                 refresh()
                 dialog.dismiss()
             }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton(android.R.string.cancel, null)
             .show()
     }
 
