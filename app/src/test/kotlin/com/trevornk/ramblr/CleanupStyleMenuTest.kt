@@ -86,6 +86,17 @@ class CleanupStyleMenuTest {
         assertEquals(CleanupPersonas.FORMAL, result.persona)
     }
 
+    @Test fun `Diplomatic is offered, can be selected, and is remembered per app`() {
+        assertTrue(CleanupStyleMenu.load(app, null).personas.contains(CleanupPersonas.DIPLOMATIC))
+
+        CleanupStyleMenu.select(app, "com.example.app", CleanupPersonas.DIPLOMATIC)
+
+        assertEquals("diplomatic", prefs().getString("cleanup_style", null))
+        assertEquals(PostProcessor.DIPLOMATIC_PROMPT, prefs().getString("post_processing_prompt", null))
+        assertEquals(CleanupPersonas.DIPLOMATIC, CleanupStyleMenu.load(app, "com.example.app").current)
+        assertEquals("diplomatic", PerAppPersonaStore.personaKeyFor(app, "com.example.app"))
+    }
+
     @Test fun `select also turns cleanup on`() {
         assertFalse(PostProcessingToggle.isEnabled(app))
 

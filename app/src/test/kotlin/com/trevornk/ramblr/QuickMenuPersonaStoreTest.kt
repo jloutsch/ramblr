@@ -6,8 +6,13 @@ import org.junit.Test
 
 class QuickMenuPersonaStoreTest {
 
-    @Test fun `default selection is the five built-in personas in display order`() {
+    @Test fun `default selection is every built-in persona in display order`() {
         assertEquals(CleanupPersonas.BUILT_IN.map { it.key }, QuickMenuPersonaStore.defaultSelection())
+    }
+
+    @Test fun `the default built-in selection, Diplomatic included, fits the quick menu cap`() {
+        assertTrue(QuickMenuPersonaStore.defaultSelection().contains("diplomatic"))
+        assertTrue(QuickMenuPersonaStore.defaultSelection().size <= QuickMenuPersonaStore.MAX_ENTRIES)
     }
 
     @Test fun `serialize then deserialize round trips a key list`() {

@@ -29,7 +29,8 @@ data class CleanupPersona(
  * identical prompt after this refactor. [EMAIL]/[CONCISE] are new task-oriented presets (#103)
  * added after surveying Wispr Flow / Superwhisper / Willow / Aqua's built-in modes -- every one of
  * them ships task/context presets (email, message, notes) rather than character personas, so these
- * two fill the gap FORMAL/CASUAL/NOTES don't cover.
+ * two fill the gap FORMAL/CASUAL/NOTES don't cover. [DIPLOMATIC] (2026-10) rewrites rude or
+ * angry speech into polite wording that keeps the speaker's point.
  *
  * [GANGSTER]/[SMART]/[TEACHER] were the original #40 tone-filter built-ins; #103 demoted them to
  * [LEGACY_RETIRED] -- no longer presented as defaults, but still resolvable by key (any existing
@@ -76,6 +77,13 @@ object CleanupPersonas {
         prompt = PostProcessor.CONCISE_PROMPT,
     )
 
+    val DIPLOMATIC = CleanupPersona(
+        key = "diplomatic",
+        title = "Diplomatic",
+        subtitle = "Turns rude or angry speech into calm, polite wording — same point, no swearing. Cloud cleanup only",
+        prompt = PostProcessor.DIPLOMATIC_PROMPT,
+    )
+
     // Retired from BUILT_IN by #103 -- kept as named constants so fromKey/legacy resolution and
     // the one-time custom-store seeding still have a single source of truth for their prompts.
     val GANGSTER = CleanupPersona(
@@ -101,7 +109,7 @@ object CleanupPersonas {
     )
 
     /** Every built-in persona, in the order shown in Settings (NATURAL first as the default). */
-    val BUILT_IN: List<CleanupPersona> = listOf(NATURAL, FORMAL, CASUAL, NOTES, EMAIL, CONCISE)
+    val BUILT_IN: List<CleanupPersona> = listOf(NATURAL, FORMAL, CASUAL, NOTES, EMAIL, CONCISE, DIPLOMATIC)
 
     /** Retired built-ins (#103): no longer shown as defaults, but still resolvable by key and
      *  seeded once into [CustomPersonaStore] so existing selections/quick-menu entries survive. */

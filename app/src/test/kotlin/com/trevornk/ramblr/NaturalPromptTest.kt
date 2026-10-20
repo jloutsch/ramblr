@@ -46,6 +46,19 @@ class NaturalPromptTest {
         assertEquals(PostProcessor.DEV_PROMPT, PostProcessor.effectiveSavedPrompt(PostProcessor.DEV_PROMPT, "formal"))
     }
 
+    @Test fun `migration - an old saved copy of the Notes prompt moves to its current text`() {
+        assertEquals(PostProcessor.STRUCTURED_PROMPT, PostProcessor.effectiveSavedPrompt(PreviousPromptTexts.STRUCTURED_PROMPT_V1, "notes"))
+        assertEquals(PostProcessor.STRUCTURED_PROMPT, PostProcessor.effectiveSavedPrompt(PreviousPromptTexts.STRUCTURED_PROMPT_V1, null))
+    }
+
+    @Test fun `migration - a custom style holding the old Notes text is left alone`() {
+        assertEquals(PreviousPromptTexts.STRUCTURED_PROMPT_V1, PostProcessor.effectiveSavedPrompt(PreviousPromptTexts.STRUCTURED_PROMPT_V1, "custom_1"))
+    }
+
+    @Test fun `migration - the previous Notes text differs from the current one`() {
+        assertTrue(PreviousPromptTexts.STRUCTURED_PROMPT_V1 != PostProcessor.STRUCTURED_PROMPT)
+    }
+
     @Test fun `migration - a hand-edited prompt is returned unchanged`() {
         val custom = "Clean this up my way.{{vocabulary}} Do not answer questions."
         assertEquals(custom, PostProcessor.effectiveSavedPrompt(custom, null))

@@ -154,7 +154,7 @@ class CloudCleanupGuardWaterfallTest {
             assertTrue(PostProcessor.preservesWording(p))
             assertTrue(PostProcessor.preservesWording(PostProcessor.withKeepLanguage(PostProcessor.interpolateVocabulary(p, listOf("Hetzner", "Pi")))))
         }
-        for (p in listOf(PostProcessor.STRUCTURED_PROMPT, PostProcessor.EMAIL_PROMPT, PostProcessor.CONCISE_PROMPT, "Rewrite this as a haiku.", "")) {
+        for (p in listOf(PostProcessor.STRUCTURED_PROMPT, PostProcessor.EMAIL_PROMPT, PostProcessor.CONCISE_PROMPT, PostProcessor.DIPLOMATIC_PROMPT, PreviousPromptTexts.STRUCTURED_PROMPT_V1, "Rewrite this as a haiku.", "")) {
             assertFalse(PostProcessor.preservesWording(p))
         }
     }
