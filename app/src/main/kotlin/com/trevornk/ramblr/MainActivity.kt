@@ -17,16 +17,17 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 
 /**
- * Slim category-list launcher (#93 restructure): status row, then one row per Settings category
- * that navigates to its own Activity (SetupActivity/TranscriptionActivity/CleanupActivity/
- * LivePreviewActivity/AdvancedActivity). This used to be one continuous ScrollView holding every
- * row for every category directly -- see git history before #93 for that version.
+ * Launcher / main settings screen: the status row, then rows grouped by what you come here to
+ * do (Speech and text, Starting dictation, Your recordings, Privacy and data, More). Each row
+ * opens its own Activity; BehaviorActivity, InvocationActivity and DataLogsActivity show one
+ * section per launch (see their EXTRA_SECTION). This used to be one continuous ScrollView
+ * holding every row for every category directly -- see git history before #93 for that version.
  *
  * The onboarding wizard (dialogs + advance/finish state machine) stays owned by this Activity
  * rather than moving to any of the category screens: it's a cross-cutting flow that touches
  * Transcription, Cleanup, and Streaming Preview state in sequence, so splitting it across those
  * screens would mean either duplicating the dialog logic or having each screen reach into its
- * siblings' prefs. AdvancedActivity's "Redo setup walkthrough" row hands off to this Activity via
+ * siblings' prefs. SetupActivity's "Redo setup walkthrough" row hands off to this Activity via
  * [EXTRA_START_WALKTHROUGH] rather than re-implementing any wizard step itself.
  */
 class MainActivity : BaseSettingsActivity() {
@@ -45,7 +46,6 @@ class MainActivity : BaseSettingsActivity() {
     private lateinit var floatingIconRowSub: TextView
     private lateinit var diagnosticsRowSub: TextView
     private lateinit var sections: LinearLayout
-    private lateinit var searchResults: LinearLayout
     private lateinit var serviceKilledBanner: View
     private lateinit var staleComponentBanner: View
 
@@ -110,11 +110,6 @@ class MainActivity : BaseSettingsActivity() {
         statusSubtitle = statusRow.findViewWithTag("subtitle")
         root.addView(statusRow)
 
-        // Settings search: typing swaps the grouped list below for matching settings from every
-        // screen; tapping a result opens that screen scrolled to the row (SettingsSearchIndex).
-        searchResults = vertical(0, 0).apply { visibility = View.GONE }
-        root.addView(buildSearchBox())
-        root.addView(searchResults)
         sections = vertical(0, 0)
         root.addView(sections)
 
@@ -333,64 +328,6 @@ class MainActivity : BaseSettingsActivity() {
         if (intent?.getBooleanExtra(EXTRA_START_WALKTHROUGH, false) == true) {
             intent.removeExtra(EXTRA_START_WALKTHROUGH)
             startWalkthrough()
-        }
-    }
-
-    // --- Settings search ---
-
-    private fun buildSearchBox(): View {
-        val box = EditText(this).apply {
-            hint = "Search settings"
-            setSingleLine()
-            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
-            textSize = 16f
-            val icon = ContextCompat.getDrawable(this@MainActivity, R.drawable.ic_settings_search)?.mutate()?.apply {
-                setTint(attrColor(android.R.attr.textColorSecondary))
-            }
-            setCompoundDrawablesRelativeWithIntrinsicBounds(icon, null, null, null)
-            compoundDrawablePadding = dp(12)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            background = android.graphics.drawable.GradientDrawable().apply {
-                cornerRadius = dp(28).toFloat()
-                setColor(attrColor(com.google.android.material.R.attr.colorSurfaceVariant))
-            }
-            addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
-                override fun afterTextChanged(s: android.text.Editable?) = showSearchResults(s?.toString().orEmpty())
-            })
-        }
-        return LinearLayout(this).apply {
-            // Takes the initial focus itself, so opening the app doesn't focus the search box and
-            // pop the keyboard up before the user asked to search.
-            isFocusable = true
-            isFocusableInTouchMode = true
-            setPadding(dp(16), dp(8), dp(16), dp(8))
-            addView(box, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT))
-        }
-    }
-
-    private fun showSearchResults(query: String) {
-        val results = SettingsSearchIndex.search(query)
-        val searching = query.isNotBlank()
-        sections.visibility = if (searching) View.GONE else View.VISIBLE
-        searchResults.visibility = if (searching) View.VISIBLE else View.GONE
-        searchResults.removeAllViews()
-        if (!searching) return
-        if (results.isEmpty()) {
-            searchResults.addView(TextView(this).apply {
-                text = "Nothing found for \"${query.trim()}\""
-                textSize = 14f
-                setTextColor(attrColor(android.R.attr.textColorSecondary))
-                setPadding(dp(24), dp(16), dp(24), dp(16))
-            })
-            return
-        }
-        for (entry in results) {
-            searchResults.addView(settingsRow(entry.title, entry.where) {
-                startActivity(entry.open(this).putExtra(EXTRA_HIGHLIGHT_TITLE, entry.title))
-            })
         }
     }
 

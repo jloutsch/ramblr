@@ -196,9 +196,6 @@ class CleanupActivity : BaseSettingsActivity() {
             rawTextRetrySwitch.isChecked = newVal
         })
 
-        // Keyboard translation languages moved to the Voice keyboard screen (InvocationActivity),
-        // next to the keyboard they configure.
-
         // #276: read-only "what will actually happen" line, matching TranscriptionActivity's.
         // Placed outside cleanupDetailContainer so it's visible even while cleanup itself is off
         // (in which case it just reads "Cleanup: Off").

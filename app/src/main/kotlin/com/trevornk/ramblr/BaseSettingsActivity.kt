@@ -216,46 +216,6 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
         if (row is ViewGroup) for (i in 0 until row.childCount) row.getChildAt(i).isEnabled = enabled
     }
 
-    /** Scrolls to and briefly highlights the row titled [EXTRA_HIGHLIGHT_TITLE], when a settings
-     *  search result opened this screen. */
-    override fun onPostResume() {
-        super.onPostResume()
-        val title = intent?.getStringExtra(EXTRA_HIGHLIGHT_TITLE) ?: return
-        intent.removeExtra(EXTRA_HIGHLIGHT_TITLE)
-        val content = findViewById<ViewGroup>(android.R.id.content)
-        content.post {
-            val row = findRowTitled(content, title) ?: return@post
-            val scroll = generateSequence(row.parent as? View) { it.parent as? View }
-                .filterIsInstance<android.widget.ScrollView>().firstOrNull()
-            if (scroll != null) {
-                val rect = android.graphics.Rect()
-                row.getDrawingRect(rect)
-                scroll.offsetDescendantRectToMyCoords(row, rect)
-                scroll.smoothScrollTo(0, (rect.top - dp(96)).coerceAtLeast(0))
-            }
-            val flash = ColorDrawable(withAlpha(attrColor(com.google.android.material.R.attr.colorPrimary), 0x33))
-            val original = row.background
-            row.background = flash
-            android.animation.ObjectAnimator.ofInt(flash, "alpha", 255, 0).apply {
-                duration = 1600
-                startDelay = 300
-                addListener(object : android.animation.AnimatorListenerAdapter() {
-                    override fun onAnimationEnd(animation: android.animation.Animator) { row.background = original }
-                })
-                start()
-            }
-        }
-    }
-
-    private fun findRowTitled(view: View, title: String): View? {
-        if (view.visibility != View.VISIBLE) return null
-        if (view.getTag(R.id.settings_row_divider) != null &&
-            view.findViewWithTag<TextView>("title")?.text?.toString() == title
-        ) return view
-        if (view is ViewGroup) for (i in 0 until view.childCount) findRowTitled(view.getChildAt(i), title)?.let { return it }
-        return null
-    }
-
     protected fun sectionHeader(title: String) = TextView(this).apply {
         text = title
         textSize = 14f
@@ -354,7 +314,5 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
         const val ICON_GAP_DP = 20
         const val DISABLED_ALPHA = 0.38f
         const val DETAILS_ALPHA = 0.8f
-        /** Row title to scroll to and flash when this screen opens (set by settings search). */
-        const val EXTRA_HIGHLIGHT_TITLE = "com.trevornk.ramblr.extra.HIGHLIGHT_TITLE"
     }
 }
