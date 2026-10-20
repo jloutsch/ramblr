@@ -45,6 +45,7 @@ enum class JobFailure {
     LOCAL_UNAVAILABLE,
     TRANSCRIPTION_FAILED,
     STORAGE,
+    TOO_LARGE,
     INTERRUPTED,
     TIMED_OUT,
 }

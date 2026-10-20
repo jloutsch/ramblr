@@ -183,6 +183,7 @@ internal object AudioJobNotifications {
             JobFailure.NO_PROVIDER -> R.string.audio_failure_no_provider
             JobFailure.LOCAL_UNAVAILABLE -> R.string.audio_failure_local_unavailable
             JobFailure.STORAGE -> R.string.audio_failure_storage
+            JobFailure.TOO_LARGE -> R.string.audio_failure_too_large
             JobFailure.INTERRUPTED -> R.string.audio_failure_interrupted
             JobFailure.TIMED_OUT -> R.string.audio_failure_timed_out
             JobFailure.TRANSCRIPTION_FAILED, null -> R.string.audio_failure_transcription_failed
