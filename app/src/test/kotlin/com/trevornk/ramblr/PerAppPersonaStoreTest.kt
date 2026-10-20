@@ -18,6 +18,13 @@ class PerAppPersonaStoreTest {
         assertEquals(map, parsed)
     }
 
+    @Test fun `a remembered Diplomatic style resolves for its app`() {
+        val map = PerAppPersonaStore.parse(PerAppPersonaStore.serialize(mapOf("com.slack" to CleanupPersonas.DIPLOMATIC.key)))
+
+        assertSame(CleanupPersonas.DIPLOMATIC, PerAppPersonaStore.resolvePersona(map, "com.slack", CleanupPersonas.NATURAL))
+        assertSame(CleanupPersonas.NATURAL, PerAppPersonaStore.resolvePersona(map, "com.other", CleanupPersonas.NATURAL))
+    }
+
     @Test fun `parse returns empty map for blank or malformed input`() {
         assertEquals(emptyMap<String, String>(), PerAppPersonaStore.parse(null))
         assertEquals(emptyMap<String, String>(), PerAppPersonaStore.parse(""))
