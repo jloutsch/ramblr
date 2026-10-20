@@ -9,7 +9,8 @@ package com.trevornk.ramblr
  * getting this wrong is worse than not shipping:** these are behavioral opt-outs applied at the
  * points Ramblr already gates today (ring visibility, `onTap`/`requestToggleRecording`, final
  * injection) -- not a change to what the accessibility service is bound to or listens for. See
- * [WhisperAccessibilityService.onAccessibilityEvent] (still an empty override) and PRIVACY.md's
+ * [WhisperAccessibilityService.onAccessibilityEvent] (still an empty override unless the user opted
+ * into a non-Always "Show the icon" mode -- see [RingEventTypes]) and PRIVACY.md's
  * "Accessibility Service" section: this feature adds zero new event subscriptions and zero
  * continuous foreground-tracking. Every function below is evaluated *on demand*, at the exact
  * moment an existing call site would otherwise have acted, using whatever foreground-package read

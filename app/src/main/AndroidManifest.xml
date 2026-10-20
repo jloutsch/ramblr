@@ -116,7 +116,9 @@
 
              Deliberately NOT accessibility-backed: this Activity never touches
              WhisperAccessibilityService, which is the whole point of choosing this option in #157
-             (the service's onAccessibilityEvent stays empty, so PRIVACY.md's claims stay true).
+             (the service's onAccessibilityEvent stays empty by default, so PRIVACY.md's claims stay true;
+             it only handles window/focus events if the user opts into a non-Always "Show the icon"
+             mode, which this Activity never touches).
 
              android:label is what the selection menu shows, so it is the app name rather than a
              verb; excludeFromRecents/noHistory keep a one-shot dialog out of the recents list.

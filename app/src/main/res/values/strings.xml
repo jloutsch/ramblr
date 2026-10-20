@@ -143,4 +143,12 @@
     <string name="audio_notif_failed_text">%1$s. Tap to see it in Ramblr.</string>
     <string name="audio_notif_recording_title">Recording a note</string>
     <string name="audio_notif_recording_text">Ramblr is recording. Tap Stop to save it for later.</string>
+
+    <!-- Behavior > "Show the icon" (ring visibility mode). -->
+    <string name="ring_visibility_title">Show the icon</string>
+    <string name="ring_visibility_always">Always</string>
+    <string name="ring_visibility_keyboard">Only while the keyboard is open</string>
+    <string name="ring_visibility_text_field">While a text field is selected</string>
+    <string name="ring_visibility_text_field_summary">While a text field is selected, even after you close the keyboard</string>
+    <string name="ring_visibility_summary">%1$s. Never hides while you\'re recording</string>
 </resources>

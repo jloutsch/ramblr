@@ -115,6 +115,19 @@ Ramblr uses Android Accessibility Service only to identify the currently focused
 
 Ramblr is not designed to monitor browsing, collect screen content for analytics, or perform background automation.
 
+### "Show the icon" setting
+
+By default the floating icon is always shown, and Ramblr does not handle any accessibility events
+(`onAccessibilityEvent` is an empty override).
+
+If you choose Settings → Behavior → **Show the icon** → "Only while the keyboard is open" or "While a
+text field is selected", Ramblr listens for window and focus changes so it knows when a text field or
+keyboard is showing. That is the only thing it uses them for: it checks whether a keyboard window is
+open and whether the focused item is an editable text field. It never reads what's on screen, and it
+stores and sends nothing about it. The extra listening is added only while one of those two options is
+selected, and is removed again as soon as you switch back to Always. Ramblr doesn't do this for anyone
+who hasn't chosen it.
+
 ### Per-app exclusions
 
 Settings → Behavior → App exclusions lets you list specific app packages (banking apps, password
@@ -126,7 +139,8 @@ regardless of exclusion.
 
 **This is a behavioral opt-out, not a security boundary.** The accessibility service stays
 enabled and bound exactly as it is for every other app; excluding an app does not detach the
-service, does not change what `onAccessibilityEvent` does (still an empty override — see above),
+service, does not change what `onAccessibilityEvent` does (still an empty override unless you chose a
+"Show the icon" option other than Always — see above),
 and does not bypass or weaken that app's own fraud/security detections in any way. If you want
 Ramblr fully disabled before opening a sensitive app, use the in-app "Turn Ramblr off" switch
 (Settings → Invocation) or Floating icon mode's off switch — those actually remove Ramblr from the

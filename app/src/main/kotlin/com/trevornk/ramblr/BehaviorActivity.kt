@@ -27,6 +27,7 @@ class BehaviorActivity : BaseSettingsActivity() {
     private lateinit var automationOffHookSwitch: MaterialSwitch
     private lateinit var exclusionListRowSub: TextView
     private lateinit var autoPeekSwitch: MaterialSwitch
+    private lateinit var ringVisibilityRowSub: TextView
     private lateinit var autoPeekDelayRow: LinearLayout
     private lateinit var peekSizeRow: LinearLayout
     private lateinit var singleTapRestoreSwitch: MaterialSwitch
@@ -142,6 +143,10 @@ class BehaviorActivity : BaseSettingsActivity() {
         }
         exclusionListRowSub = exclusionListRow.findViewWithTag("subtitle")
         root.addView(exclusionListRow)
+
+        val ringVisibilityRow = settingsRow(getString(R.string.ring_visibility_title), ringVisibilitySummary()) { promptRingVisibility() }
+        ringVisibilityRowSub = ringVisibilityRow.findViewWithTag("subtitle")
+        root.addView(ringVisibilityRow)
 
         autoPeekSwitch = MaterialSwitch(this).apply {
             isChecked = AutoPeekToggle.isEnabled(this@BehaviorActivity)
@@ -337,6 +342,43 @@ class BehaviorActivity : BaseSettingsActivity() {
         refresh()
     }
 
+    private fun ringVisibilityLabel(mode: RingVisibilityMode): String = getString(
+        when (mode) {
+            RingVisibilityMode.ALWAYS -> R.string.ring_visibility_always
+            RingVisibilityMode.KEYBOARD -> R.string.ring_visibility_keyboard
+            RingVisibilityMode.TEXT_FIELD -> R.string.ring_visibility_text_field
+        },
+    )
+
+    private fun ringVisibilitySummary(): String {
+        val choice = getString(
+            when (RingVisibilityMode.read(this)) {
+                RingVisibilityMode.ALWAYS -> R.string.ring_visibility_always
+                RingVisibilityMode.KEYBOARD -> R.string.ring_visibility_keyboard
+                RingVisibilityMode.TEXT_FIELD -> R.string.ring_visibility_text_field_summary
+            },
+        )
+        return getString(R.string.ring_visibility_summary, choice)
+    }
+
+    private fun promptRingVisibility() {
+        val modes = RingVisibilityMode.entries
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.ring_visibility_title)
+            .setSingleChoiceItems(
+                modes.map { ringVisibilityLabel(it) }.toTypedArray(),
+                modes.indexOf(RingVisibilityMode.read(this)),
+            ) { dialog, which ->
+                // The running service watches this preference and re-subscribes / re-lays-out the
+                // ring itself (WhisperAccessibilityService.startObservingRingMode).
+                RingVisibilityMode.write(this, modes[which])
+                refresh()
+                dialog.dismiss()
+            }
+            .setNegativeButton(android.R.string.cancel, null)
+            .show()
+    }
+
     private fun refresh() {
         iconHiddenRow.visibility = if (IconHiddenState.isHidden(this)) View.VISIBLE else View.GONE
         debugVisibilitySwitch.isChecked = DebugVisibilityToggle.isEnabled(this)
@@ -344,6 +386,7 @@ class BehaviorActivity : BaseSettingsActivity() {
         hideIconSwitch.isChecked = HideIconToggle.isEnabled(this)
         automationOffHookSwitch.isChecked = AutomationOffHookToggle.isEnabled(this)
         exclusionListRowSub.text = exclusionListSummary()
+        ringVisibilityRowSub.text = ringVisibilitySummary()
         autoPeekSwitch.isChecked = AutoPeekToggle.isEnabled(this)
         singleTapRestoreSwitch.isChecked = SingleTapRestoreToggle.isEnabled(this)
         rawTextRetrySwitch.isChecked = RawTextRetryToggle.isEnabled(this)
