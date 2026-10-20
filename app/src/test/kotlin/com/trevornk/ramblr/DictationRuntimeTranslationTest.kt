@@ -80,12 +80,17 @@ class DictationRuntimeTranslationTest {
         app.getSharedPreferences("ramblr", Context.MODE_PRIVATE).edit().clear()
             .putBoolean("use_local", false)
             .putBoolean(KeyboardTranslationReadiness.KEY_CONSENT, true).apply()
+        // Secure credential storage outlives the shared prefs reset, and other tests leave keys in it.
+        ProviderKind.values().forEach { ProviderCredentialStore.clearLegacyByKind(app, it) }
         PostProcessingToggle.setEnabled(app, false)
         listener = Listener()
         runtime = DictationRuntime(app, listener, InMemoryDictationSessionLeaseRegistry()) { dir, sm -> Engine(dir, sm) }
     }
 
-    @After fun tearDown() { server.shutdown() }
+    @After fun tearDown() {
+        server.shutdown()
+        ProviderKind.values().forEach { ProviderCredentialStore.clearLegacyByKind(app, it) }
+    }
 
     private fun base() = server.url("/v1").toString().trimEnd('/')
 

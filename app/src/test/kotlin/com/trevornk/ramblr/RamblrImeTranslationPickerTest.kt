@@ -32,6 +32,8 @@ class RamblrImeTranslationPickerTest {
 
     @Before fun setUp() {
         prefs().edit().clear().putBoolean("local_cleanup_consent_seen", true).apply()
+        // Secure credential storage outlives the shared prefs reset, and other tests leave keys in it.
+        ProviderKind.values().forEach { ProviderCredentialStore.clearLegacyByKind(app, it) }
         KeyboardTranslation.setChosen(app, listOf("de", "fr"))
     }
     @After fun tearDown() { prefs().edit().clear().apply() }
