@@ -366,7 +366,8 @@ class BehaviorActivity : BaseSettingsActivity() {
                 modes.indexOf(RingVisibilityMode.read(this)),
             ) { dialog, which ->
                 RingVisibilityMode.write(this, modes[which])
-                WhisperAccessibilityService.instance?.applyOverlayVisibility()
+                // The running service watches this preference and re-subscribes / re-lays-out the
+                // ring itself (WhisperAccessibilityService.startObservingRingMode).
                 refresh()
                 dialog.dismiss()
             }

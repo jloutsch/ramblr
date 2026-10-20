@@ -681,8 +681,17 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private var feedbackShowing = false
     /** Last "is the ring's anchor present" answer seen by [onAccessibilityEvent] (keyboard up, or
      *  a text field focused, per [RingVisibilityMode]), so the overlay is only re-laid-out when it
-     *  actually changes -- each re-layout itself fires another TYPE_WINDOWS_CHANGED. */
-    private var lastRingAnchorPresent: Boolean? = null
+     *  actually changes -- each re-layout itself fires another TYPE_WINDOWS_CHANGED. Reset on every
+     *  mode change ([onRingVisibilityModeChanged]) because the answer depends on the mode. */
+    internal val ringAnchorTracker = RingAnchorTracker()
+    /** Adds window/focus events to the subscription only while the user has picked a non-ALWAYS
+     *  [RingVisibilityMode]; see [RingEventTypes]. Main thread only. */
+    internal val ringEventSubscription = RingEventSubscription(
+        getInfo = { serviceInfo },
+        setInfo = { serviceInfo = it },
+    )
+    /** Strong reference: SharedPreferences holds listeners weakly. */
+    private var ringModePrefsListener: android.content.SharedPreferences.OnSharedPreferenceChangeListener? = null
     private var layoutParams: WindowManager.LayoutParams? = null
     private var feedbackLayoutParams: WindowManager.LayoutParams? = null
 
@@ -828,6 +837,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
         CustomPersonaStore.ensureLegacySeeded(this)
         ProviderChainMigration.runIfNeeded(this)
         ProviderAccountMigration.runIfNeeded(this)
+        // Event subscription follows the "Show the icon" choice: nothing beyond the static config
+        // for ALWAYS (the default), window/focus changes otherwise. See RingEventTypes.
+        startObservingRingMode()
         showOverlay()
         // Self-heal the recovery notification (#135): if the icon is hidden but the notification
         // was swiped away, this is the first moment we can put the way back on screen again.
@@ -960,21 +972,45 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
     }
 
-    /** Only window and focus changes matter, and only for a non-ALWAYS [RingVisibilityMode]: they
-     *  are how the service learns the keyboard opened/closed or a text field gained/lost focus
-     *  without any polling. */
+    /**
+     * Does nothing in the default [RingVisibilityMode.ALWAYS]: Ramblr reads no events. Only when
+     * the user picks "only while the keyboard is open" / "while a text field is selected" is the
+     * subscription widened (see [RingEventTypes]) and this looks at window and focus changes, purely
+     * to learn whether a keyboard window or an editable field is up. It never reads text or screen
+     * content -- only window types, [AccessibilityNodeInfo.isEditable] and the class name.
+     */
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         val type = event?.eventType ?: return
-        if (type != AccessibilityEvent.TYPE_WINDOWS_CHANGED && type != AccessibilityEvent.TYPE_VIEW_FOCUSED) return
         val mode = RingVisibilityMode.read(this)
-        if (mode == RingVisibilityMode.ALWAYS) {
-            lastRingAnchorPresent = null
-            return
-        }
+        if (!RingEventTypes.isRelevant(mode, type)) return
         val present = isKeyboardShowing() || (mode == RingVisibilityMode.TEXT_FIELD && isTextFieldFocused())
-        if (present == lastRingAnchorPresent) return
-        lastRingAnchorPresent = present
+        if (!ringAnchorTracker.update(present)) return
         applyOverlayVisibility()
+    }
+
+    /**
+     * Brings the event subscription and the ring in line with the saved [RingVisibilityMode]. Runs
+     * whenever the saved mode changes (and once at connect). Resets [ringAnchorTracker] first: its
+     * last answer was computed under the previous mode, so keeping it could swallow the first real
+     * transition after e.g. KEYBOARD -> TEXT_FIELD.
+     */
+    internal fun onRingVisibilityModeChanged() {
+        ringAnchorTracker.reset()
+        ringEventSubscription.apply(RingVisibilityMode.read(this))
+        applyOverlayVisibility()
+    }
+
+    /** Subscribes to the saved mode now and to every later change (the Behavior screen just
+     *  writes the preference). */
+    internal fun startObservingRingMode() {
+        ringEventSubscription.apply(RingVisibilityMode.read(this))
+        val prefs = getSharedPreferences("ramblr", MODE_PRIVATE)
+        ringModePrefsListener?.let { prefs.unregisterOnSharedPreferenceChangeListener(it) }
+        val listener = android.content.SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+            if (key == RingVisibilityMode.KEY) onRingVisibilityModeChanged()
+        }
+        ringModePrefsListener = listener
+        prefs.registerOnSharedPreferenceChangeListener(listener)
     }
     override fun onInterrupt() {}
 
@@ -991,6 +1027,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         instance = null
+        ringModePrefsListener?.let {
+            getSharedPreferences("ramblr", MODE_PRIVATE).unregisterOnSharedPreferenceChangeListener(it)
+        }
+        ringModePrefsListener = null
         clearDictationTarget()
         unregisterNetworkCallback()
         unregisterScreenStateReceiver()

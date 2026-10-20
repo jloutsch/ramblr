@@ -15,9 +15,10 @@ import java.util.concurrent.Executors
  *
  * This is deliberately a plain, self-contained Activity with **no accessibility involvement at
  * all**: [WhisperAccessibilityService] is not modified, not consulted, and does not even have to
- * be enabled for this to work. `onAccessibilityEvent` stays empty, which is the load-bearing
- * sentence of Ramblr's privacy posture (`PRIVACY.md`) — #157 rejects the inline-typed-trigger
- * option precisely because it would delete it.
+ * be enabled for this to work. `onAccessibilityEvent` stays empty by default (it only handles
+ * window/focus events if the user opts into a non-Always "Show the icon" mode, see
+ * [RingEventTypes]), which is the load-bearing sentence of Ramblr's privacy posture
+ * (`PRIVACY.md`) — #157 rejects the inline-typed-trigger option precisely because it would delete it.
  *
  * Running the real cleanup pipeline from here needs no service refactor: [PostProcessor
  * .processProviderChain], [ProviderChainStore], [CloudFeatureToggle], [PersonaRegistry] and

@@ -337,6 +337,12 @@ For exactly one thing: inserting dictated text into the focused field across app
 background automation. It acts only when you tap its mic. The keyboard and select-text paths don't
 use the service at all.
 
+The one exception is a setting you have to turn on yourself. If you choose **Behavior → Show the
+icon → Only while the keyboard is open** (or **While a text field is selected**), Ramblr also
+listens for window and focus changes to know when a text field or keyboard is showing. It never
+reads what's on screen. With the default (**Always**) it listens for nothing extra, and switching
+back to Always stops it right away.
+
 ---
 
 ## Build from source
