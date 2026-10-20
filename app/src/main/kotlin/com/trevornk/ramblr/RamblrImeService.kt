@@ -22,6 +22,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.annotation.VisibleForTesting
 import androidx.appcompat.view.ContextThemeWrapper
+import com.google.android.material.progressindicator.CircularProgressIndicator
 import kotlin.concurrent.thread
 
 /** Voice-only IME shell. It deliberately contains no conventional key rows or typing features. */
@@ -29,9 +30,14 @@ class RamblrImeService : InputMethodService() {
     companion object {
         private const val TAG = "RamblrImeService"
         private const val PICKER_HOST_TAG = "ime_style_picker_host"
+        internal const val MIC_PROGRESS_TAG = "ime_mic_progress"
+        private const val MIC_DP = 72
+        /** Space between the mic button and the processing ring around it. */
+        private const val RING_GAP_DP = 4
         private val STYLE_PREF_KEYS = setOf(
             PostProcessingToggle.KEY, "cleanup_style", "per_app_cleanup_persona",
             PerAppPersonaToggle.KEY, "quick_menu_persona_keys", "custom_cleanup_personas",
+            KeyboardTranslation.KEY_TARGET, KeyboardTranslation.KEY_LANGUAGES,
         )
     }
 
@@ -58,6 +64,13 @@ class RamblrImeService : InputMethodService() {
     private var statusView: TextView? = null
     private var partialView: TextView? = null
     private var micButton: ImageButton? = null
+    private var micWave: MicWaveView? = null
+    private var micProgress: CircularProgressIndicator? = null
+    private var panelRoot: View? = null
+    /** The keyboard theme the current input view was built with, to notice a change in Settings. */
+    private var inflatedTheme: KeyboardTheme? = null
+    /** Set while the picker shows the off-device consent question: what to do on "Allow". */
+    private var pendingConsent: (() -> Unit)? = null
     private var lastRenderedState: ImeUiState? = null
     // #312: cleanup-style picker + quick edit keys.
     private var mainPanel: LinearLayout? = null
@@ -80,9 +93,17 @@ class RamblrImeService : InputMethodService() {
      * white in dark mode while the rest of the app followed the system. Wrapping the app's DayNight
      * theme around the inflation context is what makes colorSurface and friends both exist and
      * track night mode. It is rebuilt per input view so a day/night flip picks up fresh resources.
+     * A forced Light/Dark [KeyboardTheme] overrides the night bit on this wrapper only; the default
+     * (Match system) applies no override, so the panel looks exactly as it always did.
      */
     private fun panelContext(): Context =
-        inflationContext ?: ContextThemeWrapper(this, R.style.Theme_PhoneWhisper).also { inflationContext = it }
+        inflationContext ?: ContextThemeWrapper(this, R.style.Theme_PhoneWhisper).also { wrapper ->
+            KeyboardTheme.current(this).nightOverride()?.let { wrapper.applyOverrideConfiguration(it) }
+            inflationContext = wrapper
+        }
+
+    @VisibleForTesting
+    internal fun panelRootForTest(): View? = panelRoot
 
     @VisibleForTesting
     internal fun panelControllerForTest(): ImePanelController? = panelController
@@ -108,6 +129,7 @@ class RamblrImeService : InputMethodService() {
         // Discard any previous wrapper: on a uiMode change Android recreates the input view, and a
         // cached wrapper would still hold the old night-mode resources.
         inflationContext = null
+        inflatedTheme = KeyboardTheme.current(this)
         val context = panelContext()
         val root = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
@@ -143,6 +165,7 @@ class RamblrImeService : InputMethodService() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
         mainPanel = main
+        panelRoot = root
 
         statusView = TextView(context).apply {
             text = getString(R.string.ime_status_idle)
@@ -166,12 +189,32 @@ class RamblrImeService : InputMethodService() {
             contentDescription = getString(R.string.ime_mic_start)
             setColorFilter(Color.WHITE)
             background = ovalBackground(resolveColor(com.google.android.material.R.attr.colorPrimary, Color.rgb(33, 96, 180)))
-            setOnClickListener { panelController?.onMicTap() }
+            // A disabled view still answers an accessibility ACTION_CLICK, so the lock on the mic
+            // while a recording is transcribed has to be enforced here as well as painted.
+            setOnClickListener { if (isEnabled) panelController?.onMicTap() }
         }
-        val micParams = LinearLayout.LayoutParams(dp(72), dp(72)).apply {
-            topMargin = dp(4)
-            bottomMargin = dp(8)
+        // Drawn over the button while recording, in place of the mic glyph; not clickable, so taps
+        // fall through to the button underneath.
+        micWave = MicWaveView(context)
+        // Spins around the locked mic while the recording is transcribed and cleaned up, so the
+        // wait reads as work in progress rather than a dead button. Same height budget as before
+        // (72dp button + 12dp of margin), so the keyboard does not grow.
+        micProgress = CircularProgressIndicator(context).apply {
+            tag = MIC_PROGRESS_TAG
+            isIndeterminate = true
+            indicatorSize = dp(MIC_DP + 2 * RING_GAP_DP)
+            trackThickness = dp(3)
+            setIndicatorColor(resolveColor(com.google.android.material.R.attr.colorPrimary, Color.rgb(33, 96, 180)))
+            trackColor = Color.TRANSPARENT
+            visibility = View.GONE
+            importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
+        val micArea = FrameLayout(context).apply {
+            addView(micProgress, FrameLayout.LayoutParams(dp(MIC_DP + 2 * RING_GAP_DP), dp(MIC_DP + 2 * RING_GAP_DP), Gravity.CENTER))
+            addView(micButton, FrameLayout.LayoutParams(dp(MIC_DP), dp(MIC_DP), Gravity.CENTER))
+            addView(micWave, FrameLayout.LayoutParams(dp(MIC_DP), dp(MIC_DP), Gravity.CENTER))
+        }
+        val micParams = LinearLayout.LayoutParams(dp(MIC_DP + 2 * RING_GAP_DP), dp(MIC_DP + 12))
 
         val colors = panelColors()
         styleChip = styleChip(context, colors)
@@ -186,7 +229,7 @@ class RamblrImeService : InputMethodService() {
                 },
                 LinearLayout.LayoutParams(0, -1, 1f),
             )
-            addView(micButton, micParams)
+            addView(micArea, micParams)
             addView(View(context), LinearLayout.LayoutParams(0, 1, 1f))
         }
 
@@ -213,13 +256,15 @@ class RamblrImeService : InputMethodService() {
         val actions = MaxWidthLinearLayout(context, dp(560)).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            addView(actionButton(R.drawable.ic_keyboard_switch, R.string.ime_switch_keyboard) {
+            // Tap goes straight back to the previous keyboard; long-press always offers the full list.
+            val showKeyboardPicker = {
+                (getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)?.showInputMethodPicker()
+                Unit
+            }
+            addView(actionButton(R.drawable.ic_keyboard_switch, R.string.ime_switch_keyboard, onLongPress = showKeyboardPicker) {
                 switchIme(
                     tryPrevious = { runCatching { switchToPreviousInputMethod() }.getOrDefault(false) },
-                    showPicker = {
-                        (getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager)
-                            ?.showInputMethodPicker()
-                    },
+                    showPicker = showKeyboardPicker,
                 )
             })
             addView(space(dp(8)))
@@ -244,6 +289,9 @@ class RamblrImeService : InputMethodService() {
             onClose = ::closeStylePicker,
             onToggleCleanup = ::onPickerToggleCleanup,
             onPick = ::onPickerPersona,
+            onPickTranslation = ::onPickerTranslation,
+            onEditLanguages = ::onPickerEditLanguages,
+            onConsentAnswer = ::onPickerConsentAnswer,
         ).apply { visibility = View.GONE }
         root.addView(
             MaxWidthLinearLayout(context, dp(560)).apply {
@@ -302,6 +350,8 @@ class RamblrImeService : InputMethodService() {
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
         editorIdentity = identityOf(info)
+        // A theme changed in Settings applies the next time the keyboard opens.
+        if (inflatedTheme != null && inflatedTheme != KeyboardTheme.current(this)) rebuildPanel()
         editorPolicy = imeEditorPolicy(editorIdentity.inputType, editorIdentity.imeOptions)
         secureEditorBound = !editorPolicy.allowsDictation
         if (editorPolicy.allowsDictation) {
@@ -356,14 +406,17 @@ class RamblrImeService : InputMethodService() {
         val wasNight = (resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK)
         super.onConfigurationChanged(newConfig)
         val isNight = (newConfig.uiMode and Configuration.UI_MODE_NIGHT_MASK)
-        if (wasNight != isNight) {
-            inflationContext = null
-            // Preserve whatever the panel is currently showing; this is a repaint, not a reset, and
-            // must not disturb an in-flight dictation or its bound destination.
-            val current = lastRenderedState
-            setInputView(onCreateInputView())
-            current?.let { renderState(it) }
-        }
+        if (wasNight != isNight) rebuildPanel()
+    }
+
+    /** Builds a fresh input view in place (night flip, keyboard theme change). Preserves whatever
+     *  the panel is currently showing; this is a repaint, not a reset, and must not disturb an
+     *  in-flight dictation or its bound destination. */
+    private fun rebuildPanel() {
+        inflationContext = null
+        val current = lastRenderedState
+        setInputView(onCreateInputView())
+        current?.let { renderState(it) }
     }
 
     override fun onTrimMemory(level: Int) {
@@ -410,6 +463,10 @@ class RamblrImeService : InputMethodService() {
             isPackageExcluded = { pkg -> PerAppExclusionStore.isExcluded(this, pkg) },
             isRecording = { runtime?.isRecording() ?: false },
             onCommitSettled = { refreshPanelChrome() },
+            // Keyboard-only: the floating ring's controller never passes these.
+            translationLanguage = { KeyboardTranslation.target(this)?.englishName },
+            renderLevel = { level -> micWave?.push(level) },
+            translationFailedMessage = getString(R.string.ime_translate_failed),
             backgroundSink = BackgroundResultSink(
                 copyToClipboard = { ClipboardUtil.copy(this, it) },
                 postNotice = { BackgroundDictationNotifications.postResult(this, it) },
@@ -520,6 +577,11 @@ class RamblrImeService : InputMethodService() {
         })
         micButton?.isEnabled = imeMicEnabled(state)
         micButton?.alpha = if (imeMicEnabled(state)) 1f else 0.6f
+        // The waves replace the mic glyph while recording; the ring spins while it is processed.
+        val recording = state == ImeUiState.RECORDING
+        if (recording) micButton?.setImageDrawable(null) else micButton?.setImageResource(R.drawable.ic_mic)
+        micWave?.setActive(recording)
+        micProgress?.visibility = if (imeIsProcessing(state)) View.VISIBLE else View.GONE
         refreshPanelChrome()
     }
 
@@ -666,13 +728,26 @@ class RamblrImeService : InputMethodService() {
 
         val pickerAllowed = imeStylePickerEnabled(state, pending)
         val model = CleanupStyleMenu.load(this, editorIdentity.packageName)
+        val target = KeyboardTranslation.target(this)
         styleChip?.let { chip ->
-            chip.text = if (model.cleanupEnabled) model.current.title else getString(R.string.ime_style_chip_off)
-            chip.contentDescription = when {
-                !pickerAllowed -> getString(R.string.ime_style_chip_busy_desc, if (model.cleanupEnabled) model.current.title else getString(R.string.ime_style_chip_off))
+            val styleName = if (model.cleanupEnabled) model.current.title else getString(R.string.ime_style_chip_off)
+            chip.text = imeChipText(
+                model.cleanupEnabled, model.current.title, getString(R.string.ime_style_chip_off),
+                target, getString(R.string.ime_style_chip_translate),
+            )
+            chip.contentDescription = if (target != null) {
+                when {
+                    !pickerAllowed -> getString(R.string.ime_style_chip_translate_busy_desc, target.englishName, styleName)
+                    model.cleanupEnabled -> getString(R.string.ime_style_chip_translate_desc, target.englishName, styleName)
+                    else -> getString(R.string.ime_style_chip_translate_off_desc, target.englishName)
+                }
+            } else when {
+                !pickerAllowed -> getString(R.string.ime_style_chip_busy_desc, styleName)
                 model.cleanupEnabled -> getString(R.string.ime_style_chip_desc, model.current.title)
                 else -> getString(R.string.ime_style_chip_off_desc)
             }
+            // Outlined while translating, so a target left on from earlier can't go unnoticed.
+            chip.background = ImeKeyStyle.keyBackground(panelContext(), panelColors(), outline = if (target != null) panelColors().accent else null)
         }
         setKeyEnabled(styleChip, pickerAllowed)
         if (!pickerAllowed) closeStylePicker()
@@ -685,14 +760,25 @@ class RamblrImeService : InputMethodService() {
         val host = picker.parent as? View ?: return
         // Pin the picker to the controls' current height so opening it never resizes the keyboard.
         val height = main.height.coerceAtLeast(dp(224))
-        picker.bind(CleanupStyleMenu.load(this, editorIdentity.packageName))
+        bindPicker(picker)
         host.layoutParams = (host.layoutParams as LinearLayout.LayoutParams).apply { this.height = height }
         main.visibility = View.GONE
         host.visibility = View.VISIBLE
         picker.visibility = View.VISIBLE
     }
 
+    private fun bindPicker(picker: ImeStylePickerView) {
+        pendingConsent = null
+        val target = KeyboardTranslation.target(this)
+        val notice = if (KeyboardTranslationReadiness.cloudReady(this)) null else getString(R.string.ime_translate_cloud_notice)
+        picker.bind(
+            CleanupStyleMenu.load(this, editorIdentity.packageName),
+            ImeStylePickerView.TranslateModel(KeyboardTranslation.chosen(this), target?.code, notice),
+        )
+    }
+
     private fun closeStylePicker() {
+        pendingConsent = null
         val picker = pickerView ?: return
         (picker.parent as? View)?.visibility = View.GONE
         picker.visibility = View.GONE
@@ -722,7 +808,50 @@ class RamblrImeService : InputMethodService() {
         refreshPanelChrome()
     }
 
-    private fun actionButton(icon: Int, description: Int, action: () -> Unit): ImageButton =
+    private fun onPickerTranslation(language: TranslationLanguage?) {
+        // Same rule as the style rows: the picker is unavailable while a dictation is in flight, so
+        // this only ever changes what the NEXT dictation does.
+        if (!imeStylePickerEnabled(gatingState(), commitPending())) return
+        if (language == null) {
+            KeyboardTranslation.setTarget(this, null)
+            closeStylePicker()
+            showMessage(getString(R.string.ime_translate_changed_off))
+        } else if (KeyboardTranslationReadiness.consentMissing(this)) {
+            // A keyboard cannot show a dialog: ask inside the panel, once.
+            val picker = pickerView ?: return
+            pendingConsent = {
+                KeyboardTranslation.setTarget(this, language.code)
+                showMessage(getString(R.string.ime_translate_changed, language.englishName))
+            }
+            picker.showConsent(KeyboardTranslationReadiness.consentHost(this))
+            return
+        } else {
+            KeyboardTranslation.setTarget(this, language.code)
+            closeStylePicker()
+            showMessage(getString(R.string.ime_translate_changed, language.englishName))
+        }
+        refreshPanelChrome()
+    }
+
+    private fun onPickerConsentAnswer(allowed: Boolean) {
+        val then = pendingConsent
+        pendingConsent = null
+        if (allowed) {
+            KeyboardTranslationReadiness.grantConsent(this)
+            then?.invoke()
+        }
+        closeStylePicker()
+        refreshPanelChrome()
+    }
+
+    private fun onPickerEditLanguages() {
+        closeStylePicker()
+        startActivity(
+            InvocationActivity.intent(this, InvocationActivity.Section.KEYBOARD).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        )
+    }
+
+    private fun actionButton(icon: Int, description: Int, onLongPress: (() -> Unit)? = null, action: () -> Unit): ImageButton =
         ImageButton(panelContext()).apply {
             setImageResource(icon)
             contentDescription = getString(description)
@@ -731,6 +860,7 @@ class RamblrImeService : InputMethodService() {
             minimumWidth = dp(48)
             minimumHeight = dp(48)
             setOnClickListener { action() }
+            onLongPress?.let { longPress -> setOnLongClickListener { longPress(); true } }
             layoutParams = LinearLayout.LayoutParams(dp(48), dp(48))
         }
 

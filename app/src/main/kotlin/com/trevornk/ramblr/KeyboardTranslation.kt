@@ -7,10 +7,11 @@ import android.content.Context
 internal data class TranslationLanguage(val code: String, val englishName: String, val nativeName: String)
 
 /**
- * Keyboard-only translation: the user picks a handful of languages in Settings, and the keyboard
- * shows one chip per language next to "Original". The chosen target applies to dictations started
- * from the keyboard only; the floating icon never translates. Translation is done by the cloud
- * cleanup step, so it needs a cloud AI provider (on-device cleanup models are too small for it).
+ * Keyboard-only translation: the user picks a handful of languages in Settings, and the keyboard's
+ * style picker shows one chip per language next to "Original". The chosen target applies to
+ * dictations started from the keyboard only; the floating icon never translates. Translation is
+ * done by a cloud cleanup step ([KeyboardTranslationRouting]), so it needs a cloud AI provider
+ * (on-device cleanup models are too small for it and ignore the prompt).
  */
 internal object KeyboardTranslation {
     private const val PREFS_NAME = "ramblr"
@@ -81,7 +82,7 @@ internal object KeyboardTranslation {
     /** Settings row summary. */
     fun summary(context: Context): String {
         val chosen = chosen(context)
-        return if (chosen.isEmpty()) "None yet. Pick languages to get translate buttons on the keyboard"
+        return if (chosen.isEmpty()) context.getString(R.string.keyboard_translation_languages_none)
             else chosen.joinToString(", ") { it.englishName }
     }
 

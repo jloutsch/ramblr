@@ -96,6 +96,19 @@ interface RuntimeListener {
     /** Whether this host/session permits retention of transcript-bearing diagnostics. */
     fun allowsTranscriptRetention(): Boolean = true
 
+    /** The keyboard's translate setting: English name of the language this dictation should be
+     *  translated into, or null to keep the spoken language. Read once, when cleanup starts. Only
+     *  the voice keyboard returns non-null; any thread. */
+    fun translationTarget(): String? = null
+
+    /** Whether the host animates a mic level. Only then does the recorder's reader thread measure
+     *  loudness at all; the floating ring never pays for it. */
+    fun wantsAudioLevel(): Boolean = false
+
+    /** Mic loudness from 0 (silence) to 1, about 20 times a second while recording. Main thread.
+     *  Only called when [wantsAudioLevel] is true. */
+    fun onAudioLevel(level: Float) {}
+
     /**
      * #284: a dictation ended without any text to deliver (nothing heard, provider/chain error,
      * timeout). Invoked on the main thread immediately BEFORE the [onIdleUi] funnel for that
@@ -358,6 +371,10 @@ class DictationRuntime internal constructor(
      *  a chain edit in Settings (which reshapes the step list) resets the position-based cursor
      *  rather than resuming at a now-different step (M3). */
     private var lastCleanupWaterfallSignature: String? = null
+    /** Separate from [cleanupCursor]: a translation runs on a cloud-only copy of the waterfall,
+     *  so the shared cursor's step index would point at a different step there. */
+    private val translationCursor = CleanupWaterfallCursor()
+    private var lastTranslationWaterfallSignature: String? = null
 
     @Volatile private var activeToken: Int = 0
 
@@ -412,6 +429,7 @@ class DictationRuntime internal constructor(
      *  network-callback registration for when this fires. */
     internal fun onDefaultNetworkChanged() {
         cleanupCursor.reset()
+        translationCursor.reset()
     }
 
     // #280: serializes batch-model loads so a dictation that stops while a load is still in
@@ -752,6 +770,17 @@ class DictationRuntime internal constructor(
                 runCatching { liveAttempt.session?.sendPcm(buf, len) }
             }
 
+            // Loudness for a host that animates the mic (the voice keyboard): measured on the reader
+            // thread, posted at most ~20 times a second, and dropped once this recording is no
+            // longer the live one. Hosts that do not ask for it get the original callback untouched.
+            val levelMeter = if (listener.wantsAudioLevel()) AudioLevelMeter() else null
+            val meteredOnChunk: (ByteArray, Int) -> Unit = if (levelMeter == null) onChunk else { buf, len ->
+                onChunk(buf, len)
+                levelMeter.offer(buf, len, android.os.SystemClock.uptimeMillis())?.let { level ->
+                    handler.post { if (stateMachine.isRecording()) listener.onAudioLevel(level) }
+                }
+            }
+
             val engine = engineFactory(context.cacheDir, stateMachine)
             val started = engine.start(
             onFinished = { result ->
@@ -770,7 +799,7 @@ class DictationRuntime internal constructor(
                 val finalResult = if (compressedFile != null) result.copy(compressedFile = compressedFile) else result
                 onRecordingFinished(engine, finalResult, lease)
             },
-            onChunk = onChunk
+            onChunk = meteredOnChunk
         )
             if (!started) {
             // End the streaming session so a failed recorder start doesn't leak the OnlineStream
@@ -1892,7 +1921,23 @@ class DictationRuntime internal constructor(
             return
         }
 
-        val usePostProcessing = PostProcessingToggle.shouldRunCleanup(PostProcessingToggle.isEnabled(context))
+        val cleanupEnabled = PostProcessingToggle.shouldRunCleanup(PostProcessingToggle.isEnabled(context))
+        // Keyboard translation (see KeyboardTranslationRouting): done by the first cloud cleanup step
+        // that has a key -- never by an on-device step, which ignores the prompt -- and when nothing
+        // can translate the dictation goes in untranslated with the reason shown in the panel.
+        val requestedTranslation = listener.translationTarget()
+        val translationRoute = KeyboardTranslationRouting.route(
+            target = requestedTranslation,
+            effectiveChain = if (requestedTranslation == null) ProviderChain(emptyList()) else KeyboardTranslationReadiness.effectiveChain(context),
+            consentMissing = requestedTranslation != null && KeyboardTranslationReadiness.consentMissing(context),
+            hasCredential = { KeyboardTranslationReadiness.hasCredential(context, it) },
+        )
+        if (translationRoute is KeyboardTranslationRouting.Route.Unavailable) {
+            val message = context.getString(KeyboardTranslationRouting.messageRes(translationRoute.reason))
+            toast(message)
+        }
+        val translation = translationRoute as? KeyboardTranslationRouting.Route.Cloud
+        val usePostProcessing = cleanupEnabled || translation != null
 
         if (usePostProcessing) {
             // Phase 3 (#95): "Use cloud for Cleanup" toggle on the new unified Cloud screen --
@@ -1900,17 +1945,25 @@ class DictationRuntime internal constructor(
             // only place that needs to know about it; everything downstream (cleanupWaterfallFor,
             // shouldUseCleanupExecutor, processProviderChain) keeps operating on a plain
             // ProviderChain exactly as Phase 2 verified.
-            val providerChain = ProviderChainRuntime.effectiveChainForCleanup(
+            // A translation runs on its own cloud-only chain (and its own cursor, since the shared
+            // cursor's step index belongs to the full waterfall).
+            val providerChain = translation?.chain ?: ProviderChainRuntime.effectiveChainForCleanup(
                 ProviderChainStore.load(context), CloudFeatureToggle.cleanupEnabled(context), DictationModeToggle.allowLocalFallback(context)
             )
-            val cleanupWaterfall = ProviderChainRuntime.cleanupWaterfallFor(providerChain)
+            val cleanupWaterfall = translation?.waterfall ?: ProviderChainRuntime.cleanupWaterfallFor(providerChain)
+            val activeCursor = if (translation != null) translationCursor else cleanupCursor
 
             // Reset the position-based waterfall cursor whenever the chain reshapes since the last
             // cleanup (add/remove/reorder/toggle in Settings), so a cached raw index can't resume at
             // a step that now occupies a different position -- which would skip newly-added free/
             // local steps and mis-attribute success to the wrong step (M3).
             val waterfallSignature = cleanupWaterfallSignature(cleanupWaterfall)
-            if (waterfallSignature != lastCleanupWaterfallSignature) {
+            if (translation != null) {
+                if (waterfallSignature != lastTranslationWaterfallSignature) {
+                    translationCursor.reset()
+                    lastTranslationWaterfallSignature = waterfallSignature
+                }
+            } else if (waterfallSignature != lastCleanupWaterfallSignature) {
                 cleanupCursor.reset()
                 lastCleanupWaterfallSignature = waterfallSignature
             }
@@ -1932,8 +1985,9 @@ class DictationRuntime internal constructor(
             // CleanupWaterfallExecutor and can fall through past an unconfigured cloud step to
             // another provider (including LOCAL). Note this is only a pre-flight check -- since
             // #105 every chain, this one included, is executed by CleanupWaterfallExecutor.
+            // (A translation chain only holds steps that already have a key.)
             val cleanupCapableEntries = providerChain.capableEntriesFor(needsTranscription = false)
-            if (!ProviderChainRuntime.shouldUseCleanupExecutor(providerChain) &&
+            if (translation == null && !ProviderChainRuntime.shouldUseCleanupExecutor(providerChain) &&
                 cleanupCapableEntries.firstOrNull()?.let { ProviderCredentialStore.getOrLegacy(context, it) }.isNullOrBlank()) {
                 handler.post {
                     if (!guard.isCurrent(token)) return@post
@@ -1954,8 +2008,14 @@ class DictationRuntime internal constructor(
                 ?.let { CleanupPersonas.promptForExplicitSelection(PersonaRegistry.resolve(context, it)) }
                 ?: savedPrompt
             val vocabulary = vocabularyTerms()
-            // #290: keep cleanup in the transcript's language (see KEEP_LANGUAGE_CLAUSE).
-            val prompt = PostProcessor.withKeepLanguage(PostProcessor.interpolateVocabulary(rawPrompt, vocabulary))
+            val prompt = if (translation != null && requestedTranslation != null) {
+                // The keyboard asked for a translation: the language clause replaces the
+                // keep-language rule below, and the fidelity guard is off for the call (see processProviderChain).
+                KeyboardTranslationRouting.prompt(cleanupEnabled, rawPrompt, vocabulary, requestedTranslation)
+            } else {
+                // #290: keep cleanup in the transcript's language (see KEEP_LANGUAGE_CLAUSE).
+                PostProcessor.withKeepLanguage(PostProcessor.interpolateVocabulary(rawPrompt, vocabulary))
+            }
 
             if (!guard.isCurrent(token)) return
             handler.post { if (guard.isCurrent(token)) listener.onCleaningStarted() }
@@ -1965,7 +2025,7 @@ class DictationRuntime internal constructor(
                     text = text,
                     prompt = prompt,
                     chain = providerChain,
-                    cursor = cleanupCursor,
+                    cursor = activeCursor,
                     cancelHolder = inFlightCall,
                     credentialLookup = { kind -> ProviderCredentialStore.getLegacyByKind(context, kind) },
                     entryCredentialLookup = { entryId -> ProviderCredentialStore.get(context, entryId) },
@@ -1977,6 +2037,9 @@ class DictationRuntime internal constructor(
                     temperatureCacheContext = context.applicationContext,
                     benchmarkContext = context.takeIf { listener.allowsTranscriptRetention() },
                     benchmarkCorrelationId = correlationIdFor(token),
+                    // Translated output shares no words with the transcript, so the wording guard
+                    // would reject every translation.
+                    fidelityGuard = translation == null && PostProcessor.preservesWording(prompt),
                 ) { result ->
                     handler.post {
                         if (!guard.isCurrent(token)) return@post // cancelled or watchdog already reset the UI
@@ -1985,7 +2048,7 @@ class DictationRuntime internal constructor(
                             // as success (the cleaned text is delivered); note it in the log so the
                             // mixed result is diagnosable. Counts only, never text.
                             result.partial?.let { Log.w(TAG, "Local cleanup was partial: ${it.cleanedChunks}/${it.totalChunks} chunks cleaned, the rest delivered raw") }
-                            val servingGroup = recordProviderChainCleanupSuccess(cleanupWaterfall)
+                            val servingGroup = recordProviderChainCleanupSuccess(cleanupWaterfall, activeCursor)
                             val paidFallbackGroup = servingGroup?.takeIf { it.isPaidFallback() }
                             // #248: Snippets expand AFTER cleanup and AFTER vocabulary correction
                             // (VocabularyPostCorrector already ran inside processProviderChain's
@@ -2033,8 +2096,8 @@ class DictationRuntime internal constructor(
      *  checks. A total-waterfall failure is deliberately not attributed to any one step here,
      *  since several steps may have failed for different reasons -- the Settings "Test" button is
      *  the deterministic way to pin down which. */
-    private fun recordProviderChainCleanupSuccess(executableWaterfall: CleanupWaterfall): CleanupStepGroup? {
-        val succeededIndex = cleanupCursor.startIndex(System.currentTimeMillis())
+    private fun recordProviderChainCleanupSuccess(executableWaterfall: CleanupWaterfall, cursor: CleanupWaterfallCursor = cleanupCursor): CleanupStepGroup? {
+        val succeededIndex = cursor.startIndex(System.currentTimeMillis())
         val step = executableWaterfall.steps.getOrNull(succeededIndex) ?: return null
         CleanupStepStatusStore.record(context, step, CleanupStepHealth.SUCCESS)
         return step.group

@@ -4,10 +4,10 @@ import android.content.Context
 import android.content.res.Configuration
 
 /** Light/dark choice for the voice keyboard panel, independent of the rest of the app. */
-internal enum class KeyboardTheme(val key: String, val title: String) {
-    SYSTEM("system", "Match system"),
-    LIGHT("light", "Light"),
-    DARK("dark", "Dark");
+internal enum class KeyboardTheme(val key: String, @androidx.annotation.StringRes val titleRes: Int) {
+    SYSTEM("system", R.string.keyboard_theme_system),
+    LIGHT("light", R.string.keyboard_theme_light),
+    DARK("dark", R.string.keyboard_theme_dark);
 
     /**
      * The configuration delta that forces this theme's night mode onto the panel's theme wrapper,

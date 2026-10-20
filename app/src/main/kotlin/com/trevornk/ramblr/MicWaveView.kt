@@ -6,6 +6,7 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.View
 import kotlin.math.PI
 import kotlin.math.exp
@@ -14,22 +15,40 @@ import kotlin.math.pow
 import kotlin.math.sin
 
 /**
+ * Frame pacing and reduced-motion rules for [MicWaveView], kept free of Android so they can be
+ * unit-tested. (The view itself needs a Canvas.)
+ */
+internal object MicWaveMotion {
+    /** The wave is decorative feedback, not video: ~30 frames a second is plenty and halves the
+     *  work a 60/120 Hz display would otherwise ask of the keyboard process. */
+    const val FRAME_INTERVAL_MS = 33L
+
+    /** Milliseconds to wait before drawing again so frames land at least [intervalMs] apart.
+     *  [lastFrameMs] is 0 before the first frame, which is due immediately. */
+    fun delayUntilNextFrame(nowMs: Long, lastFrameMs: Long, intervalMs: Long = FRAME_INTERVAL_MS): Long {
+        if (lastFrameMs <= 0L) return 0L
+        return (lastFrameMs + intervalMs - nowMs).coerceIn(0L, intervalMs)
+    }
+
+    /** The system "remove animations" switch (developer option / accessibility setting) writes an
+     *  animator duration scale of 0. Anything else, including an unreadable value, animates. */
+    fun reducedMotion(animatorDurationScale: Float): Boolean = animatorDurationScale == 0f
+
+    fun reducedMotion(context: Context): Boolean = runCatching {
+        reducedMotion(Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f))
+    }.getOrDefault(false)
+}
+
+/**
  * Sound waves drawn inside the keyboard's mic button while recording, in place of the mic glyph.
  * [push] takes the runtime's 0..1 loudness about 20 times a second.
  *
- * [Style.SINE] (the default): a few overlapping sine waves whose height follows the voice.
- * [Style.BARS]: thin rounded bars; the newest level sits in the middle and older ones flow
- * outwards, so speech reads as ripples spreading from the centre. In silence both settle flat: the
- * sine into a line, the bars into a row of dots ([push] gets 0 for room noise, see
- * [AudioLevelMeter]).
+ * A few overlapping sine waves whose height follows the voice; in silence they settle into a flat
+ * line ([push] gets 0 for room noise, see [AudioLevelMeter]). Redraws are paced to
+ * [MicWaveMotion.FRAME_INTERVAL_MS], and with the system's animations turned off the view draws the
+ * flat line once and never schedules another frame.
  */
 internal class MicWaveView(context: Context) : View(context) {
-    enum class Style { BARS, SINE }
-
-    /** A wave rather than bars, so the panel doesn't read as another vendor's voice keyboard. */
-    var style: Style = Style.SINE
-        set(value) { field = value; invalidate() }
-
     /** Wave colour; the button behind it supplies the contrast. */
     var color: Int = Color.WHITE
         set(value) { field = value; invalidate() }
@@ -37,50 +56,52 @@ internal class MicWaveView(context: Context) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val path = Path()
     private val clip = Path()
-    /** Recent levels, newest first. */
-    private val history = FloatArray(HISTORY)
-    /** What each bar currently shows, eased towards [history] so bars glide instead of jumping
-     *  at the runtime's ~20 Hz level rate. */
-    private val shownBars = FloatArray(HISTORY)
     private var active = false
     private var target = 0f
     private var shown = 0f
     private var lastFrameMs = 0L
+    private var reducedMotion = false
 
     init {
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         isClickable = false
     }
 
-    /** Shows the waves while recording; turning them off forgets the history. */
+    /** Shows the waves while recording; turning them off forgets the level. */
     fun setActive(on: Boolean) {
         if (active == on) return
         active = on
-        history.fill(0f)
-        shownBars.fill(0f)
         target = 0f
         shown = 0f
         lastFrameMs = 0L
-        if (on) postInvalidateOnAnimation() else invalidate()
+        reducedMotion = on && MicWaveMotion.reducedMotion(context)
+        if (on) scheduleFrame() else invalidate()
     }
 
     fun push(level: Float) {
-        val value = level.coerceIn(0f, 1f)
-        System.arraycopy(history, 0, history, 1, HISTORY - 1)
-        history[0] = value
-        target = value
-        postInvalidateOnAnimation()
+        target = level.coerceIn(0f, 1f)
+        // No invalidate here: the frame loop started by [setActive] picks the level up on its next
+        // tick, so the 20 Hz level stream cannot raise the redraw rate above the cap.
     }
 
-    internal fun historyForTest(): FloatArray = history.copyOf()
+    internal fun targetForTest(): Float = target
+    internal fun reducedMotionForTest(): Boolean = reducedMotion
+
+    private fun scheduleFrame() {
+        postInvalidateDelayed(MicWaveMotion.delayUntilNextFrame(SystemClock.uptimeMillis(), lastFrameMs))
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         if (!active) return
-        when (style) {
-            Style.BARS -> drawBars(canvas)
-            Style.SINE -> drawSine(canvas)
+        if (reducedMotion) {
+            drawSine(canvas, level = 0f, seconds = 0f)
+            return
         }
+        val now = SystemClock.uptimeMillis()
+        shown = ease(shown, target, frameDelta(now))
+        drawSine(canvas, level = shown, seconds = now / 1000f)
+        scheduleFrame()
     }
 
     /** Milliseconds since the previous frame, so easing runs at the same speed at any frame rate. */
@@ -93,30 +114,7 @@ internal class MicWaveView(context: Context) : View(context) {
     private fun ease(from: Float, to: Float, dt: Float): Float =
         from + (to - from) * (1f - exp(-dt / (if (to > from) RISE_MS else FALL_MS)))
 
-    private fun drawBars(canvas: Canvas) {
-        val dt = frameDelta(SystemClock.uptimeMillis())
-        for (i in 0 until HISTORY) shownBars[i] = ease(shownBars[i], history[i], dt)
-        val density = resources.displayMetrics.density
-        val barWidth = BAR_WIDTH_DP * density
-        val gap = BAR_GAP_DP * density
-        val maxHeight = min(width, height) * BAR_MAX_HEIGHT
-        val total = BARS * barWidth + (BARS - 1) * gap
-        val cy = height / 2f
-        paint.color = color
-        paint.style = Paint.Style.FILL
-        for (i in 0 until BARS) {
-            val distance = kotlin.math.abs(i - BARS / 2)
-            val bar = barWidth + (maxHeight - barWidth) * lift(shownBars[distance]) * ENVELOPE[distance]
-            val left = (width - total) / 2f + i * (barWidth + gap)
-            canvas.drawRoundRect(left, cy - bar / 2f, left + barWidth, cy + bar / 2f, barWidth / 2f, barWidth / 2f, paint)
-        }
-        postInvalidateOnAnimation()
-    }
-
-    private fun drawSine(canvas: Canvas) {
-        val now = SystemClock.uptimeMillis()
-        shown = ease(shown, target, frameDelta(now))
-
+    private fun drawSine(canvas: Canvas, level: Float, seconds: Float) {
         val size = min(width, height).toFloat()
         val cx = width / 2f
         val cy = height / 2f
@@ -127,8 +125,7 @@ internal class MicWaveView(context: Context) : View(context) {
         canvas.clipPath(clip)
         paint.style = Paint.Style.STROKE
         paint.strokeCap = Paint.Cap.ROUND
-        val amplitude = size * SINE_MAX_AMPLITUDE * lift(shown)
-        val seconds = now / 1000f
+        val amplitude = size * SINE_MAX_AMPLITUDE * lift(level)
         for ((index, wave) in WAVES.withIndex()) {
             path.reset()
             val steps = 48
@@ -147,7 +144,6 @@ internal class MicWaveView(context: Context) : View(context) {
             canvas.drawPath(path, paint)
         }
         canvas.restore()
-        postInvalidateOnAnimation()
     }
 
     /** Lifts quiet-to-normal speech so the waves use most of their height without clipping
@@ -157,14 +153,6 @@ internal class MicWaveView(context: Context) : View(context) {
     private class Wave(val cycles: Float, val speed: Float, val scale: Float, val alpha: Int)
 
     private companion object {
-        const val BARS = 9
-        const val HISTORY = BARS / 2 + 1
-        const val BAR_WIDTH_DP = 2f
-        const val BAR_GAP_DP = 2.5f
-        /** Tallest bar as a share of the button, leaving a margin inside the circle. */
-        const val BAR_MAX_HEIGHT = 0.62f
-        /** Outer bars are shorter so the group stays inside the round button. */
-        val ENVELOPE = floatArrayOf(1f, 0.86f, 0.7f, 0.54f, 0.38f)
         /** Peak sine height either side of the centre line, as a share of the button. */
         const val SINE_MAX_AMPLITUDE = 0.24f
         const val LIFT = 0.7f

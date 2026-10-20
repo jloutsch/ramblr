@@ -166,6 +166,15 @@ internal class ImePanelController(
      *  (success, stale, rejected or abandoned), so the keyboard can re-enable keys it held back
      *  while [isCommitPending]. */
     private val onCommitSettled: () -> Unit = {},
+    /** The keyboard's translate target (English language name), or null for "keep the language
+     *  spoken". Read once when a dictation starts, so a change applies to the NEXT dictation. */
+    private val translationLanguage: () -> String? = { null },
+    /** Mic loudness 0..1 while recording, for the panel's level animation. Null for no animation;
+     *  the runtime then does not measure loudness at all. */
+    private val renderLevel: ((Float) -> Unit)? = null,
+    /** In-panel text for a dictation that asked for a translation and still failed cleanup, so the
+     *  generic "cleanup failed" notice does not hide that it was the translation. */
+    private val translationFailedMessage: String = "Translation failed — inserted untranslated text",
 ) {
     private var active = true
     private var deliveryTerminal = false
@@ -175,6 +184,18 @@ internal class ImePanelController(
     @Volatile private var editorPolicy = ImeEditorPolicy(allowsDictation = true, allowsRetention = true)
     @Volatile private var sessionAllowsRetention = true
     @Volatile private var commitPending = false
+    @Volatile private var dictationTranslation: String? = null
+    /** The runtime's last message ("Error: ...", "No speech detected", ...). Its teardown repaints
+     *  IDLE right after posting one, which used to overwrite the text before it could be read, so
+     *  every idle repaint shows it again until the next recording starts. */
+    private var lastMessage: String? = null
+    private var lastIdentity: ImeEditorIdentity? = null
+
+    /** A message that must outlive the idle repaint the runtime sends right after it. */
+    private fun notice(message: String) {
+        lastMessage = message
+        userMessage(message)
+    }
 
     /**
      * True from the moment a finished dictation is handed to [listener]'s `deliverText` until its
@@ -186,7 +207,9 @@ internal class ImePanelController(
 
     val listener: RuntimeListener = object : RuntimeListener {
         override fun onRecordingStartRequested() {
+            lastMessage = null
             if (!active || !editorPolicy.allowsDictation) return
+            dictationTranslation = translationLanguage()
             editorSnapshot?.invoke()?.let { (generation, identity, connection) ->
                 onEditorChanged(generation, identity, connection)
             }
@@ -201,7 +224,11 @@ internal class ImePanelController(
         override fun onRecordingStarted() { if (active) renderState(ImeUiState.RECORDING) }
         override fun onEnterTranscribingUi() { if (active) renderState(ImeUiState.TRANSCRIBING) }
         override fun onCleaningStarted() { if (active) renderState(ImeUiState.CLEANING) }
-        override fun onIdleUi() { if (active) renderState(ImeUiState.IDLE) }
+        override fun onIdleUi() {
+            if (!active) return
+            renderState(ImeUiState.IDLE)
+            lastMessage?.let(userMessage)
+        }
         override fun onStreamingTeardown() = Unit
         override fun onStreamingPartial(text: String) { if (active) renderPartial(text) }
         override fun onCloudLiveInterim(text: String) {
@@ -210,7 +237,7 @@ internal class ImePanelController(
         override fun onUserMessage(message: String) {
             if (!active) return
             renderState(ImeUiState.ERROR)
-            userMessage(message)
+            notice(message)
         }
 
         override fun deliverText(
@@ -240,7 +267,7 @@ internal class ImePanelController(
                 if (ownsUi) latestUiTicket = null
                 if (ownsUi && active) {
                     renderState(ImeUiState.IDLE)
-                    userMessage("Ramblr is excluded in this app — nothing inserted")
+                    notice("Ramblr is excluded in this app — nothing inserted")
                 }
                 // #284: when the user has since left that editor an in-panel message nobody sees
                 // isn't enough. Nothing is copied (excluded); the notice states what was saved.
@@ -284,6 +311,9 @@ internal class ImePanelController(
 
         override fun foregroundPackageName(): String? = cachedPackageName
         override fun allowsTranscriptRetention(): Boolean = sessionAllowsRetention
+        override fun translationTarget(): String? = dictationTranslation
+        override fun wantsAudioLevel(): Boolean = renderLevel != null
+        override fun onAudioLevel(level: Float) { if (active) renderLevel?.invoke(level) }
 
         // #284: only a notification when the editor this dictation was for is gone; while it is
         // still bound the runtime's own toast + the panel's ERROR state already say everything.
@@ -345,16 +375,20 @@ internal class ImePanelController(
         if (!ownsUi) return
         if (result != ImeCommitResult.SUCCESS) {
             renderState(ImeUiState.ERROR)
-            userMessage(
+            notice(
                 if (historySaved) "Text could not be inserted — dictated text was saved in Ramblr history"
                 else "Text could not be inserted"
             )
         } else if (cleanupError != null) {
-            userMessage("Cleanup failed — inserted raw transcript")
+            notice(if (dictationTranslation != null) translationFailedMessage else "Cleanup failed — inserted raw transcript")
         }
     }
 
     fun onEditorChanged(generation: Long, identity: ImeEditorIdentity, connection: Any?) {
+        // A message about the last field's dictation means nothing in a different field; the
+        // keyboard repaints its idle text on such a change, so forget it here too.
+        if (identity != lastIdentity) lastMessage = null
+        lastIdentity = identity
         cachedPackageName = identity.packageName
         editorPolicy = imeEditorPolicy(identity.inputType, identity.imeOptions)
         if (editorPolicy.allowsDictation) destination.editorChanged(generation, identity, connection)
@@ -372,7 +406,7 @@ internal class ImePanelController(
         }
         // #256: only blocks a NEW recording (not currently recording) -- stop stays reachable.
         if (!isRecording() && isPackageExcluded(cachedPackageName)) {
-            userMessage("Ramblr is excluded in this app — see Settings > Privacy")
+            notice("Ramblr is excluded in this app — see Settings > Privacy")
             return
         }
         runtime.onTap()
@@ -383,6 +417,7 @@ internal class ImePanelController(
         if (!active) return
         active = false
         commitPending = false
+        lastMessage = null
         sessionAllowsRetention = false
         deliveryTicket = null
         latestUiTicket = null
@@ -404,6 +439,10 @@ internal fun imeMicEnabled(state: ImeUiState): Boolean = when (state) {
     ImeUiState.TRANSCRIBING, ImeUiState.CLEANING, ImeUiState.SECURE_FIELD -> false
     ImeUiState.IDLE, ImeUiState.RECORDING, ImeUiState.ERROR -> true
 }
+
+/** The recording is being transcribed or cleaned up: the mic is locked and a ring spins around it. */
+internal fun imeIsProcessing(state: ImeUiState): Boolean =
+    state == ImeUiState.TRANSCRIBING || state == ImeUiState.CLEANING
 
 internal fun imeMicAppearance(state: ImeUiState): ImeMicAppearance = when {
     state == ImeUiState.RECORDING -> ImeMicAppearance.RECORDING
