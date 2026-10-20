@@ -3091,7 +3091,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // right, since nothing was corrected.
         VocabularySuggestionCollector.collect(this, rawText = rawText ?: text, finalText = text)
 
-        pendingClipboardRestore?.let { handler.removeCallbacks(it) }
+        // An earlier paste's delayed restore runs now, not never: the clipboard read below must see
+        // what the user had copied, not that dictation's text.
+        pendingClipboardRestore?.let { handler.removeCallbacks(it); it.run() }
         pendingClipboardRestore = null
         pendingInjectionRetry?.let { handler.removeCallbacks(it) }
         pendingInjectionRetry = null
