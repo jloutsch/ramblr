@@ -11,16 +11,13 @@ import kotlin.concurrent.thread
  * "Updates" settings screen (Part 3 of the GitHub self-update feature, github distribution
  * flavor only). Lives in src/github/kotlin/ (not src/main/) for the same Google Play policy
  * reason as [SelfUpdateChecker]/[SelfUpdateResolver] -- see [SelfUpdateChecker]'s AGENTS note.
- * This is why it's a wholly separate Activity rather than added directly into the shared
- * [AdvancedActivity]: a flavor source set can't *override* an existing main-source Activity
+ * This is why it's a wholly separate Activity rather than added directly into a shared
+ * main-source screen: a flavor source set can't *override* an existing main-source Activity
  * class in this Gradle/AGP setup (there's exactly one compiled class per fully-qualified name
- * per variant; "extending" it would mean either duplicating AdvancedActivity's UI-building code
- * here or moving AdvancedActivity itself into src/github/, which would remove it from storefront
- * entirely -- wrong, since everything else on that screen applies to both flavors). A new,
- * storefront-absent Activity is the only approach where the extra section is *only* ever compiled
- * into the github flavor, matching the same physical-absence requirement SelfUpdateChecker.kt's
- * kdoc already establishes for this whole feature. [AdvancedActivity] still gets one entry-point
- * row into this screen, added via reflection (`Class.forName`) rather than a direct
+ * per variant). A new, storefront-absent Activity is the only approach where the extra section
+ * is *only* ever compiled into the github flavor, matching the same physical-absence requirement
+ * SelfUpdateChecker.kt's kdoc already establishes for this whole feature. [MainActivity] gets one
+ * "Updates" entry-point row into this screen, added via reflection (`Class.forName`) rather than a direct
  * `SelfUpdateSettingsActivity::class.java` reference, since a compile-time reference from
  * src/main/ code would fail to compile for the storefront flavor (its compile task never sees
  * this class at all).
@@ -133,7 +130,7 @@ class SelfUpdateSettingsActivity : BaseSettingsActivity() {
         autoInstallSwitch.isChecked = SelfUpdatePrefs.isAutoInstallEnabled(this)
         // Can't auto-install without checking in the first place -- visually/logically depends
         // on the notify toggle (per the Part 3 spec), shown/hidden via the same nestedGroup
-        // mechanism AdvancedActivity's dictation-history sub-row uses.
+        // mechanism the Behavior screen's sub-rows use.
         autoInstallGroup.outer.visibility = if (notifyEnabled) android.view.View.VISIBLE else android.view.View.GONE
         refreshStatusRow()
         refreshInstallNowRow()
@@ -166,7 +163,7 @@ class SelfUpdateSettingsActivity : BaseSettingsActivity() {
     }
 
     /** Triggers a real, one-off check via [SelfUpdateChecker.check] (a blocking network call, so
-     *  off the main thread -- mirrors [AdvancedActivity]'s `thread { }` pattern for the overlay
+     *  off the main thread -- mirrors the `thread { }` pattern the settings screens use for the overlay
      *  icon picker) and updates the status row with the real result. Also posts the
      *  update-available notification right away if one is found and notifications are enabled,
      *  so this one row exercises the entire notify pipeline end to end even before Part 5's

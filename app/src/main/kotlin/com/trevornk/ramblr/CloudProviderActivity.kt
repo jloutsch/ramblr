@@ -167,7 +167,7 @@ class CloudProviderActivity : BaseSettingsActivity() {
         root.addView(sectionHeader("Live Preview"))
         root.addView(settingsRow(
             "Live Preview",
-            "The streaming model is always on-device. With Live cloud transcription on (below), Cloud Live supplies the live text instead"
+            "The streaming model is always on-device. With Live cloud transcription on (under Recognition), Cloud Live supplies the live text instead"
         ).apply {
             isEnabled = false
             alpha = 0.6f

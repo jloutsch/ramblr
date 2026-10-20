@@ -365,8 +365,8 @@
         </receiver>
 
         <!-- Exposes app-private files/benchmark_log.jsonl as a content:// URI to whatever app
-             Trevor shares it via (Gmail, Discord, Drive, ...) from AdvancedActivity's "Share
-             benchmark log" action (#100), without granting broader access to app-private
+             Trevor shares it via (Gmail, Discord, Drive, ...) from the "Share
+             benchmark log" row on the Diagnostics screen (#100), without granting broader access to app-private
              storage. -->
         <provider
             android:name="androidx.core.content.FileProvider"

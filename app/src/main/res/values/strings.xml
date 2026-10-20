@@ -8,7 +8,7 @@
          captured, and a macro holding the inactive one silently no-ops on disable and, on
          enable, writes a PM-disabled component that AMS strips (taking Ramblr out of
          enabled_accessibility_services entirely). Distinct labels make the two visibly
-         different at pick time. Keep the mode names identical to the Invocation screen's cards
+         different at pick time. Keep the mode names identical to the System shortcuts screen's cards
          so a user can map picker entry to mode without guessing. -->
     <string name="accessibility_service_label_floating">Ramblr (Floating icon)</string>
     <string name="accessibility_service_label_system">Ramblr (System controls)</string>
@@ -73,7 +73,7 @@
     <string name="audio_files_row_title">Audio files</string>
     <string name="audio_files_row_idle">Transcribe a recording, or record now and transcribe later</string>
     <string name="audio_files_row_status">%1$d in progress · %2$d saved</string>
-    <string name="audio_files_intro">Transcribe an audio file from your phone or another app (use Share → Ramblr). It runs in the background and notifies you when the text is ready; the result is saved to History. Your Transcription, Cleanup and Dictation language settings apply.</string>
+    <string name="audio_files_intro">Transcribe an audio file from your phone or another app (use Share → Ramblr). It runs in the background and notifies you when the text is ready; the result is saved to History. Your Recognition, AI cleanup and Dictation language settings apply.</string>
     <string name="audio_files_pick">Transcribe an audio file</string>
     <string name="audio_files_pick_sub">Choose m4a, mp3, ogg, wav, flac and more</string>
     <string name="audio_files_record">Record a note</string>
@@ -144,7 +144,7 @@
     <string name="audio_notif_recording_title">Recording a note</string>
     <string name="audio_notif_recording_text">Ramblr is recording. Tap Stop to save it for later.</string>
 
-    <!-- Behavior > "Show the icon" (ring visibility mode). -->
+    <!-- Floating icon > "Show the icon" (ring visibility mode). -->
     <string name="ring_visibility_title">Show the icon</string>
     <string name="ring_visibility_always">Always</string>
     <string name="ring_visibility_keyboard">Only while the keyboard is open</string>

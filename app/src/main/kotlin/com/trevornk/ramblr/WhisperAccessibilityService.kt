@@ -1769,7 +1769,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         armIdlePeekTimer()
     }
 
-    /** Called from [AdvancedActivity] right after the user flips [AutoPeekToggle] off, so a ring
+    /** Called from [BehaviorActivity] right after the user flips [AutoPeekToggle] off, so a ring
      *  that's already peeked at that moment snaps back to full visibility immediately instead of
      *  silently staying peeked until the next unrelated touch happens to restore it. No-ops if the
      *  ring isn't currently peeked. Internal (not private) for the same cross-class-call reason as

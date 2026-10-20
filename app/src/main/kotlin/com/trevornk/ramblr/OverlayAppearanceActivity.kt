@@ -59,7 +59,7 @@ class OverlayAppearanceActivity : BaseSettingsActivity() {
         val root = vertical(0, 0)
 
         root.addView(TextView(this).apply {
-            text = "Overlay Appearance"
+            text = "Size and colors"
             textSize = 32f
             setPadding(dp(24), dp(64), dp(24), dp(24))
         })
@@ -335,7 +335,7 @@ class OverlayAppearanceActivity : BaseSettingsActivity() {
     companion object {
         private const val LP_MATCH = LinearLayout.LayoutParams.MATCH_PARENT
 
-        /** Category subtitle for AdvancedActivity's Overlay Appearance row (#104). */
+        /** Subtitle for the "Size and colors" row on the Floating icon screen (#104). */
         fun subtitle(context: android.content.Context): String {
             val appearance = OverlayAppearancePrefs.load(context)
             val hasCustomIcon = appearance.hasCustomIcon && OverlayIconStore.exists(context)
