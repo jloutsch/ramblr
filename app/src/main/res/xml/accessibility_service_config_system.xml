@@ -15,7 +15,7 @@
      the whole classification), which is why it lives in its own component: the OS couples an
      INVISIBLE_TOGGLE service's enabled state to its shortcut bindings (last shortcut off = whole
      service off). That trade-off is opt-in — the component ships android:enabled="false" in the
-     manifest and is only enabled when the user picks "System controls" on the System shortcuts screen.
+     manifest and is only enabled when the user picks "System controls" on the Other ways to start screen.
      The #220 guard-rail banner covers the kill-by-shortcut-switch trap while this component is
      the active one. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"

@@ -18,7 +18,7 @@ import com.google.android.material.materialswitch.MaterialSwitch
  * Rows were moved here verbatim -- same prefs keys, same toggle logic, same dialogs -- this is a
  * pure UI reorganization. Since the settings regroup, the debug toggle lives under Diagnostics
  * ([DataLogsActivity]), the per-app style and raw-text rows under AI cleanup, and compressed
- * upload plus the on-device tuning knobs under Recognition.
+ * upload plus the on-device tuning knobs under Speech recognition.
  */
 class BehaviorActivity : BaseSettingsActivity() {
 

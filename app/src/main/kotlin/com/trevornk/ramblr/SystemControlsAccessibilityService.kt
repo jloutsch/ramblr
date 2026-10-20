@@ -15,7 +15,7 @@ package com.trevornk.ramblr
  * removing the last shortcut in system Settings kills the service (#156). Since one class can't
  * be both classifications, Ramblr ships both components and PM-enables exactly one
  * ([InvocationServiceMode]): this one only when the user explicitly opts into system controls
- * on the System shortcuts screen, accepting the coupling that the guard-rail banner then watches for.
+ * on the Other ways to start screen, accepting the coupling that the guard-rail banner then watches for.
  *
  * The [WhisperAccessibilityService.accessibilityButtonCallback] registration in the base class
  * is what receives the button/gesture/volume-keys events here; on the base component the same

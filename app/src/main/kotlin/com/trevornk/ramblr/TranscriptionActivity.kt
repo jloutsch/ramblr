@@ -59,7 +59,7 @@ class TranscriptionActivity : BaseSettingsActivity() {
         val root = vertical(0, 0)
 
         val header = TextView(this).apply {
-            text = "Recognition"
+            text = "Speech recognition"
             textSize = 32f
             setPadding(dp(24), dp(64), dp(24), dp(24))
         }

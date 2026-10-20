@@ -123,7 +123,7 @@ class MainActivity : BaseSettingsActivity() {
         dictationModeRowSub = dictationModeRow.findViewWithTag("subtitle")
         sections.addView(dictationModeRow)
 
-        val transcriptionRow = settingsRow("Recognition", "Checking...", icon = R.drawable.ic_settings_mic) {
+        val transcriptionRow = settingsRow("Speech recognition", "Checking...", icon = R.drawable.ic_settings_mic) {
             startActivity(Intent(this, TranscriptionActivity::class.java))
         }
         transcriptionRowSub = transcriptionRow.findViewWithTag("subtitle")
@@ -168,7 +168,7 @@ class MainActivity : BaseSettingsActivity() {
         sections.addView(voiceKeyboardRow)
 
         // Invocation-method chooser (#156): the mode and the OS-owned ways to start dictation.
-        val invocationRow = settingsRow("System shortcuts", "Checking...", icon = R.drawable.ic_settings_touch_app) {
+        val invocationRow = settingsRow("Other ways to start", "Checking...", icon = R.drawable.ic_settings_touch_app) {
             startActivity(InvocationActivity.intent(this, InvocationActivity.Section.SHORTCUTS))
         }
         invocationRowSub = invocationRow.findViewWithTag("subtitle")

@@ -48,7 +48,7 @@ class MainSettingsUiTest {
             assertEquals(InvocationActivity::class.java.name, it.component?.className)
             assertEquals(InvocationActivity.Section.KEYBOARD.name, it.getStringExtra(InvocationActivity.EXTRA_SECTION))
         }
-        open("System shortcuts").let {
+        open("Other ways to start").let {
             assertEquals(InvocationActivity.Section.SHORTCUTS.name, it.getStringExtra(InvocationActivity.EXTRA_SECTION))
         }
         open("History").let {
@@ -103,10 +103,10 @@ class MainSettingsUiTest {
         }
         assertEquals(headings.toList(), groups.keys.toList())
         assertEquals(
-            listOf("Dictation mode", "Recognition", "AI cleanup", "Words and snippets", "Cloud providers"),
+            listOf("Dictation mode", "Speech recognition", "AI cleanup", "Words and snippets", "Cloud providers"),
             groups["Speech and text"],
         )
-        assertEquals(listOf("Floating icon", "Voice keyboard", "System shortcuts", "Recording"), groups["Starting dictation"])
+        assertEquals(listOf("Floating icon", "Voice keyboard", "Other ways to start", "Recording"), groups["Starting dictation"])
         assertEquals(listOf("History", "Audio files"), groups["Your recordings"])
         assertEquals(listOf("Privacy", "Backup & restore"), groups["Privacy and data"])
         // "Updates" is github-flavor only, so it is not asserted here.
@@ -133,7 +133,7 @@ class MainSettingsUiTest {
             .putBoolean(CloudLiveToggle.KEY, true)
             .apply()
         val main = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val started = main.window.decorView.row("Recognition").performClick().let { shadowOf(main).nextStartedActivity }
+        val started = main.window.decorView.row("Speech recognition").performClick().let { shadowOf(main).nextStartedActivity }
         assertEquals(TranscriptionActivity::class.java.name, started.component?.className)
 
         val recognition = Robolectric.buildActivity(TranscriptionActivity::class.java).setup().get()
@@ -146,7 +146,7 @@ class MainSettingsUiTest {
     @Test fun `Cloud providers points Live cloud transcription at Recognition, not below`() {
         val cloud = Robolectric.buildActivity(CloudProviderActivity::class.java).setup().get()
         val texts = cloud.window.decorView.all().filterIsInstance<TextView>().map { it.text.toString() }
-        assertTrue(texts.any { it.contains("Live cloud transcription on (under Recognition)") })
+        assertTrue(texts.any { it.contains("Live cloud transcription on (under Speech recognition)") })
         assertFalse(texts.any { it.contains("(below)") })
     }
 }

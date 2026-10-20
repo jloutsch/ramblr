@@ -8,7 +8,7 @@
          captured, and a macro holding the inactive one silently no-ops on disable and, on
          enable, writes a PM-disabled component that AMS strips (taking Ramblr out of
          enabled_accessibility_services entirely). Distinct labels make the two visibly
-         different at pick time. Keep the mode names identical to the System shortcuts screen's cards
+         different at pick time. Keep the mode names identical to the Other ways to start screen's cards
          so a user can map picker entry to mode without guessing. -->
     <string name="accessibility_service_label_floating">Ramblr (Floating icon)</string>
     <string name="accessibility_service_label_system">Ramblr (System controls)</string>

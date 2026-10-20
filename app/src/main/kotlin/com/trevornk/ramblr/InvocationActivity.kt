@@ -54,7 +54,7 @@ class InvocationActivity : BaseSettingsActivity() {
      *  BehaviorActivity: every row is built and refreshed on every launch, only the requested
      *  section is attached. No section shows both, under the old "Ways to start dictation". */
     enum class Section(val title: String) {
-        SHORTCUTS("System shortcuts"),
+        SHORTCUTS("Other ways to start"),
         KEYBOARD("Voice keyboard"),
     }
 
@@ -249,8 +249,8 @@ class InvocationActivity : BaseSettingsActivity() {
                     "On the next screen, find \u201cRamblr Voice\u201d in the on-screen keyboard " +
                     "list and turn it on. Keep your usual keyboard enabled too \u2014 you can " +
                     "switch between them any time.\n\n" +
-                    "The keyboard works alongside your System shortcuts mode; turning it on does " +
-                    "not change that mode.",
+                    "The keyboard works alongside the floating icon or system controls; turning it " +
+                    "on does not change which one you use.",
                 "Open keyboard settings",
             )
             VoiceKeyboardStatus.ENABLED_NOT_DEFAULT -> Triple(

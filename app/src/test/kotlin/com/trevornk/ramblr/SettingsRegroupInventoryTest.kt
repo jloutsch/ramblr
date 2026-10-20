@@ -65,7 +65,7 @@ class SettingsRegroupInventoryTest {
         val BEFORE = listOf(
             // Main
             "Status", "Setup", "History",
-            // Transcription (now Recognition)
+            // Transcription (now Speech recognition)
             "Use cloud transcription", "Dictation language", "Local transcription threads", "Canary language",
             "Compress audio before cloud upload", "Live cloud transcription",
             // Cleanup (now AI cleanup)
@@ -77,7 +77,7 @@ class SettingsRegroupInventoryTest {
             "Streaming live preview",
             // Personal vocabulary and snippets
             "Personal vocabulary", "Smart vocabulary suggestions", "Snippets", "Enable snippets", "+ New snippet",
-            // Invocation (now System shortcuts / Voice keyboard) and the ring
+            // Invocation (now Other ways to start / Voice keyboard) and the ring
             "Floating icon (default)", "System controls", "Ramblr keyboard", "Floating ring",
             "System accessibility button / gesture", "Volume-keys hold", "Quick Settings tile",
             "Direct shortcut control", "Turn Ramblr off",

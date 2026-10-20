@@ -236,7 +236,7 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
     }
 
     /** A smaller, indented label for a subsection nested inside a top-level feature (#49) -- e.g.
-     *  "Local models" under Recognition -- visually distinct from [sectionHeader] so it never
+     *  "Local models" under Speech recognition -- visually distinct from [sectionHeader] so it never
      *  reads as another same-level top-level area. */
     protected fun subsectionHeader(title: String, indent: Int = 1) = TextView(this).apply {
         text = title
