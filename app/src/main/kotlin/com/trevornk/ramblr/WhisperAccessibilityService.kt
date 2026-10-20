@@ -1700,7 +1700,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     /** Any interaction with the ring (drag, tap, long-press) calls this to re-arm the idle timer,
      *  cancelling whatever peek was previously scheduled and restoring the ring if it was already
      *  peeked when the new interaction began. Delay is read fresh from [AutoPeekDelay] each call
-     *  (rather than cached) so a change in Advanced settings takes effect on the very next
+     *  (rather than cached) so a change in settings takes effect on the very next
      *  interaction, no service restart needed -- same pattern as [AutoPeekToggle]. */
     private fun armIdlePeekTimer() {
         handler.removeCallbacks(idlePeekRunnable)
@@ -1710,7 +1710,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
     /** Fires once the configured [AutoPeekDelay] has elapsed with no ring interaction. Never peeks
      *  while actively recording or while cleanup/transcription is in flight (RingPeek.shouldAutoPeek),
      *  nor while the ring itself isn't currently showing (e.g. MainActivity foregrounded, #35) or
-     *  already peeked, nor at all while the user has turned auto-peek off in Advanced settings
+     *  already peeked, nor at all while the user has turned auto-peek off in settings
      *  (see [AutoPeekToggle]) -- the idle timer keeps re-arming itself in that case so the ring is
      *  ready to peek again the moment the setting is turned back on, without needing a service
      *  restart. */
@@ -1769,7 +1769,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         armIdlePeekTimer()
     }
 
-    /** Called from [AdvancedActivity] right after the user flips [AutoPeekToggle] off, so a ring
+    /** Called from [BehaviorActivity] right after the user flips [AutoPeekToggle] off, so a ring
      *  that's already peeked at that moment snaps back to full visibility immediately instead of
      *  silently staying peeked until the next unrelated touch happens to restore it. No-ops if the
      *  ring isn't currently peeked. Internal (not private) for the same cross-class-call reason as
@@ -2361,7 +2361,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
      * was previously one tap with no undo shown anywhere the user was already looking. The recovery
      * text has to be readable at the moment of the decision, because every channel for delivering
      * it afterwards is losable: the notification can be swiped, the toast disappears in seconds,
-     * and Settings > Behavior's restore row is invisible until you're already hidden.
+     * and Settings > Floating icon's restore row is invisible until you're already hidden.
      *
      * Built from the same [styleMenuRow]/[styleMenuDivider] primitives as the main menu so it
      * inherits the overlay's theming, touch handling and dismiss-on-outside-tap for free. An
@@ -2385,7 +2385,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             styleMenuRow(
                 icon = null,
                 title = "Hide it",
-                subtitle = "Get it back from the notification, the Quick Settings tile, or Settings > Behavior",
+                subtitle = "Get it back from the notification, the Quick Settings tile, or Settings > Floating icon",
             ) { onHideIconConfirmed() }
         )
 
@@ -2532,7 +2532,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // A Toast is a separate system-owned window and is unaffected. Belt-and-braces alongside
         // the confirmation page that just named the same paths: the toast is what remains on
         // screen for a moment *after* the ring vanishes, which is when the loss is felt.
-        toast("Icon hidden. Tap the notification, or Settings > Behavior, to show it again")
+        toast("Icon hidden. Tap the notification, or Settings > Floating icon, to show it again")
     }
 
     private fun startPulse() {
@@ -2584,7 +2584,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 PerAppExclusionStore.isExcluded(this, currentForegroundPackageName()),
             )
         ) {
-            toast("Ramblr is excluded in this app — see Settings > Behavior")
+            toast("Ramblr is excluded in this app — see Settings > Privacy")
             return
         }
         runtime.onTap()

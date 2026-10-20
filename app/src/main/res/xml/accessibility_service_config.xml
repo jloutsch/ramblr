@@ -22,7 +22,7 @@
      pre-#211 behavior. Existing installs' enabled_accessibility_services entries already point
      at this component, so on update they get ring-only behavior back with zero migration.
      Users who want the system button/gesture/volume-keys opt into the
-     SystemControlsAccessibilityService component via the in-app Invocation screen instead. -->
+     SystemControlsAccessibilityService component via the in-app Other ways to start screen instead. -->
 <accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
     android:accessibilityEventTypes="typeViewFocused"
     android:accessibilityFeedbackType="feedbackGeneric"

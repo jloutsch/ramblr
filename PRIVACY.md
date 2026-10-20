@@ -83,7 +83,7 @@ for dictation.
 ## Quality log (off by default)
 
 Ramblr has an optional diagnostic "quality log" for comparing transcription/cleanup providers. When
-— and only when — you enable it in Settings → Data & Logs, each dictation's raw transcript and
+— and only when — you enable it in Settings → Diagnostics, each dictation's raw transcript and
 cleaned-up text, along with the provider and model that produced them, are appended to a file in
 the app's private on-device storage. It is **off by default**: nothing is written unless you turn
 it on. The log never leaves the device on its own — it is excluded from Android backups, from

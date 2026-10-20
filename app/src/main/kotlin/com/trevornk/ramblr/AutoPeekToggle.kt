@@ -5,7 +5,7 @@ import android.content.SharedPreferences
 
 /**
  * On-by-default toggle for whether the floating ring auto-hides to a peeked sliver after
- * [RingPeek.IDLE_TIMEOUT_MS] of inactivity (Feature A). Turning this off in Advanced settings
+ * [RingPeek.IDLE_TIMEOUT_MS] of inactivity (Feature A). Turning this off in settings
  * keeps the ring fully visible at all times -- for anyone who'd rather always see it than have it
  * slide toward the edge. This is a separate, independent concern from [HideIconToggle]/
  * [IconHiddenState] (Feature B's full manual hide-to-notification path): disabling auto-peek here

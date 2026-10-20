@@ -75,7 +75,7 @@ object BackupManager {
     /** Zips every existing, non-empty file in [sources] into [destination], keyed by its map key
      *  as the zip entry name. Returns the set of entry names actually written -- a fresh install
      *  with, say, no quality log yet simply omits that entry, the same "nothing there yet" spirit
-     *  as [AdvancedActivity]'s existing shareBenchmarkLog/shareQualityLog empty-file guard. */
+     *  as [DataLogsActivity]'s existing shareBenchmarkLog/shareQualityLog empty-file guard. */
     fun zipFiles(destination: File, sources: Map<String, File>): Set<String> {
         val written = mutableSetOf<String>()
         ZipOutputStream(destination.outputStream().buffered()).use { zipOut ->

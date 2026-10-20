@@ -12,7 +12,7 @@ package com.trevornk.ramblr
  * 11 other apps killed by lowmemorykiller on a 4 GB device in #132.
  *
  * Before #139 the only code path that ever downloaded that model was enabling silence auto-stop
- * (#108) in Behavior settings, an unrelated opt-in convenience feature. Anyone doing local
+ * (#108) in settings, an unrelated opt-in convenience feature. Anyone doing local
  * transcription who never opened that toggle had no `vad_models/` directory at all, so the #132
  * fix was permanently inert for them — invisible on a high-RAM device, and a lost dictation on a
  * low-RAM one. Gating a memory-safety fix behind an unrelated UX toggle was the bug.
@@ -35,7 +35,7 @@ package com.trevornk.ramblr
  * for.
  *
  * [shouldPrefetchForLocalMode] closes that window by moving provisioning earlier, to the moment
- * the user *chooses* on-device transcription (onboarding, or the Transcription settings toggle).
+ * the user *chooses* on-device transcription (onboarding, or the Recognition settings toggle).
  * The download then overlaps setup — while the user is still granting permissions and picking an
  * ASR model, which already involves a far larger download — instead of racing their first
  * dictation. [shouldFetch] deliberately stays as the backstop for anyone who selected local mode

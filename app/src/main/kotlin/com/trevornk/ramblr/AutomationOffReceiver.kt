@@ -9,7 +9,7 @@ import android.util.Log
  * #257: exported receiver that lets an automation app (MacroDroid, Tasker) turn Ramblr's
  * accessibility service off, gated behind [AutomationOffHookToggle] (default off).
  *
- * Usage once enabled in Ramblr's Behavior settings:
+ * Usage once enabled in Ramblr's Settings > Privacy:
  *
  *     am broadcast -a com.trevornk.ramblr.action.TURN_OFF -n com.trevornk.ramblr/.AutomationOffReceiver
  *

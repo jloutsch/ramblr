@@ -59,14 +59,14 @@ class OverlayAppearanceActivity : BaseSettingsActivity() {
         val root = vertical(0, 0)
 
         root.addView(TextView(this).apply {
-            text = "Overlay Appearance"
+            text = "Size and colors"
             textSize = 32f
             setPadding(dp(24), dp(64), dp(24), dp(24))
         })
 
         root.addView(TextView(this).apply {
-            text = "Customize how the floating mic button looks. A custom icon image replaces " +
-                "the built-in circle entirely, so border/fill colors stop applying once one is set."
+            text = "Change how the floating button looks. A custom image replaces the whole " +
+                "button, so the colors below stop applying."
             textSize = 14f
             setTextColor(attrColor(android.R.attr.textColorSecondary))
             setPadding(dp(24), 0, dp(24), dp(8))
@@ -165,8 +165,7 @@ class OverlayAppearanceActivity : BaseSettingsActivity() {
     }
 
     private fun setOverlayColorRowState(row: LinearLayout, color: Int?, disabledByCustomIcon: Boolean) {
-        row.isEnabled = !disabledByCustomIcon
-        row.alpha = if (disabledByCustomIcon) 0.4f else 1f
+        setRowEnabled(row, !disabledByCustomIcon)
         row.findViewWithTag<TextView>("subtitle").text =
             if (disabledByCustomIcon) "Not used while a custom icon image is set" else colorSummary(color)
     }
@@ -336,7 +335,7 @@ class OverlayAppearanceActivity : BaseSettingsActivity() {
     companion object {
         private const val LP_MATCH = LinearLayout.LayoutParams.MATCH_PARENT
 
-        /** Category subtitle for AdvancedActivity's Overlay Appearance row (#104). */
+        /** Subtitle for the "Size and colors" row on the Floating icon screen (#104). */
         fun subtitle(context: android.content.Context): String {
             val appearance = OverlayAppearancePrefs.load(context)
             val hasCustomIcon = appearance.hasCustomIcon && OverlayIconStore.exists(context)

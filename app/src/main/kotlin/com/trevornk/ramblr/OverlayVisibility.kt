@@ -9,7 +9,7 @@ package com.trevornk.ramblr
  * vertically centered -- the same region where Settings right-aligns its switches -- so there's
  * no reason to float a tap-to-dictate trigger over the app's own Settings screen while the user
  * is looking at it, and no reason to keep showing it once the user has intentionally asked for
- * it to go away until they restore it from the notification (or the Advanced screen fallback).
+ * it to go away until they restore it from the notification (or the Floating icon screen fallback).
  *
  * TYPE_ACCESSIBILITY_OVERLAY windows draw above the lock screen and ambient display by design (so
  * accessibility tools keep working while locked) -- without this check, anyone with physical

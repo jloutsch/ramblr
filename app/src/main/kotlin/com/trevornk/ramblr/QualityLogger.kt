@@ -138,7 +138,7 @@ object QualityLogger {
         }
     }
 
-    /** Absolute on-device path of the log file, e.g. for the Advanced screen's share action. */
+    /** Absolute on-device path of the log file, e.g. for the Diagnostics screen's share action. */
     fun logFile(context: Context): File = File(context.filesDir, FILE_NAME)
 
     /** Pure JSONL-line construction, split out from [log] so it's directly unit-testable without

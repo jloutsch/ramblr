@@ -110,7 +110,15 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
 
     // --- UI Helpers (moved verbatim from the old single-Activity MainActivity, #93) ---
 
-    protected fun settingsRow(title: String, subtitle: String, widget: View? = null, indent: Int = 0, onClick: (() -> Unit)? = null): LinearLayout {
+    protected fun settingsRow(
+        title: String,
+        subtitle: String,
+        widget: View? = null,
+        indent: Int = 0,
+        icon: Int? = null,
+        details: String? = null,
+        onClick: (() -> Unit)? = null,
+    ): LinearLayout {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -148,10 +156,36 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
             setPadding(0, dp(3), 0, 0)
         })
 
+        // Optional fine print under the subtitle: the caveats a short subtitle leaves out, set
+        // smaller and lighter so the subtitle stays the line people actually read.
+        if (details != null) textContainer.addView(TextView(this).apply {
+            tag = "details"
+            text = details
+            textSize = 13f
+            alpha = DETAILS_ALPHA
+            setLineSpacing(dp(2).toFloat(), 1f)
+            setTextColor(attrColor(android.R.attr.textColorSecondary))
+            setPadding(0, dp(4), 0, 0)
+        })
+
+        if (icon != null) {
+            row.addView(android.widget.ImageView(this).apply {
+                setImageResource(icon)
+                imageTintList = android.content.res.ColorStateList.valueOf(attrColor(com.google.android.material.R.attr.colorPrimary))
+                layoutParams = LinearLayout.LayoutParams(dp(ICON_DP), dp(ICON_DP)).apply { marginEnd = dp(ICON_GAP_DP) }
+                importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            })
+        }
         row.addView(textContainer)
         if (widget != null) {
-            // Keep a gap so wrapped text never runs into the switch.
+            // Keep a gap so wrapped text never runs into the switch. With fine print under the
+            // subtitle the row gets tall, so the switch sits beside the title it belongs to
+            // instead of floating in the middle of the paragraph.
             (textContainer.layoutParams as LinearLayout.LayoutParams).marginEnd = dp(16)
+            if (details != null) {
+                val lp = widget.layoutParams?.let { LinearLayout.LayoutParams(it) } ?: LinearLayout.LayoutParams(LP_WRAP, LP_WRAP)
+                widget.layoutParams = lp.apply { gravity = Gravity.TOP; topMargin = dp(6) }
+            }
             row.addView(widget)
         }
 
@@ -163,13 +197,23 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
         val divider = LayerDrawable(arrayOf(ColorDrawable(withAlpha(attrColor(android.R.attr.textColorPrimary), 0x40)))).apply {
             setLayerGravity(0, Gravity.BOTTOM or Gravity.FILL_HORIZONTAL)
             setLayerHeight(0, 1)
-            setLayerInsetStart(0, dp(24) + dp(INDENT_STEP_DP) * indent)
+            // Starts under the text, past the icon when there is one (Material inset-divider style).
+            setLayerInsetStart(0, dp(24) + dp(INDENT_STEP_DP) * indent + if (icon != null) dp(ICON_DP + ICON_GAP_DP) else 0)
             setLayerInsetEnd(0, dp(24))
         }
         row.foreground = divider
         row.setTag(R.id.settings_row_divider, divider)
 
         return row
+    }
+
+    /** Greys out a row whose setting only matters while another switch is on (e.g. "Auto-hide
+     *  delay" under "Auto-hide icon"): dimmed and not tappable, but still visible, so the user can
+     *  see what turning the parent on would unlock. */
+    protected fun setRowEnabled(row: View, enabled: Boolean) {
+        row.isEnabled = enabled
+        row.alpha = if (enabled) 1f else DISABLED_ALPHA
+        if (row is ViewGroup) for (i in 0 until row.childCount) row.getChildAt(i).isEnabled = enabled
     }
 
     protected fun sectionHeader(title: String) = TextView(this).apply {
@@ -181,8 +225,18 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
         setPadding(dp(24), dp(28), dp(24), dp(8))
     }
 
+    /** A short paragraph under a header or row that explains a whole group, set in the same
+     *  secondary style everywhere so explanations never compete with row titles. */
+    protected fun explainer(text: String) = TextView(this).apply {
+        this.text = text
+        textSize = 14f
+        setLineSpacing(dp(2).toFloat(), 1f)
+        setTextColor(attrColor(android.R.attr.textColorSecondary))
+        setPadding(dp(24), 0, dp(24), dp(12))
+    }
+
     /** A smaller, indented label for a subsection nested inside a top-level feature (#49) -- e.g.
-     *  "Local models" under Transcription -- visually distinct from [sectionHeader] so it never
+     *  "Local models" under Speech recognition -- visually distinct from [sectionHeader] so it never
      *  reads as another same-level top-level area. */
     protected fun subsectionHeader(title: String, indent: Int = 1) = TextView(this).apply {
         text = title
@@ -256,5 +310,9 @@ abstract class BaseSettingsActivity : AppCompatActivity() {
         const val INDENT_STEP_DP = 16
         // Breathing room below the last item of every screen, on top of the navigation bar inset.
         const val BOTTOM_SPACE_DP = 32
+        const val ICON_DP = 24
+        const val ICON_GAP_DP = 20
+        const val DISABLED_ALPHA = 0.38f
+        const val DETAILS_ALPHA = 0.8f
     }
 }
