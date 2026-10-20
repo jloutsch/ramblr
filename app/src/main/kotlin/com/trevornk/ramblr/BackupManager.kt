@@ -3,6 +3,7 @@ package com.trevornk.ramblr
 import android.content.Context
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
@@ -125,8 +126,10 @@ object BackupManager {
      *  mechanism, not an edge case to "fix". */
     data class RestoreResult(val restoredEntries: Set<String>, val skippedEntries: Set<String>)
 
-    /** Restores every entry in [source] whose name matches a key in [targets], overwriting that
-     *  file in place. See this class's kdoc for the zip-slip-safety contract this relies on.
+    /** Restores every entry in [source] whose name matches a key in [targets], replacing that
+     *  file. See this class's kdoc for the zip-slip-safety contract this relies on. Every entry is
+     *  written to a staging file first and the targets are only replaced once the whole zip has
+     *  been read, so a truncated or corrupt backup leaves the live files untouched.
      *
      *  Plain [File] overwrite is correct for the JSONL log files: every read site
      *  ([DictationHistoryStore], [BenchmarkLogger], [QualityLogger]) opens the file fresh each
@@ -134,24 +137,32 @@ object BackupManager {
      *  see [restoreBackup]'s kdoc for why that entry is deliberately excluded here and handled
      *  separately. */
     fun unzipToTargets(source: InputStream, targets: Map<String, File>): RestoreResult {
-        val restored = mutableSetOf<String>()
+        val staged = linkedMapOf<String, File>()
         val skipped = mutableSetOf<String>()
-        ZipInputStream(source).use { zipIn ->
-            var entry: ZipEntry? = zipIn.nextEntry
-            while (entry != null) {
-                val target = targets[entry.name]
-                if (target == null) {
-                    skipped += entry.name
-                } else {
-                    target.parentFile?.mkdirs()
-                    target.outputStream().use { out -> zipIn.copyTo(out) }
-                    restored += entry.name
+        try {
+            ZipInputStream(source).use { zipIn ->
+                var entry: ZipEntry? = zipIn.nextEntry
+                while (entry != null) {
+                    val target = targets[entry.name]
+                    if (target == null) {
+                        skipped += entry.name
+                    } else {
+                        target.parentFile?.mkdirs()
+                        val stage = File(target.parentFile, "${target.name}.restoring")
+                        staged[entry.name] = stage
+                        stage.outputStream().use { out -> zipIn.copyTo(out) }
+                    }
+                    zipIn.closeEntry()
+                    entry = zipIn.nextEntry
                 }
-                zipIn.closeEntry()
-                entry = zipIn.nextEntry
             }
+            staged.forEach { (name, stage) ->
+                if (!stage.renameTo(targets.getValue(name))) throw IOException("Couldn't replace $name")
+            }
+        } finally {
+            staged.values.forEach { it.delete() }
         }
-        return RestoreResult(restored, skipped)
+        return RestoreResult(staged.keys.toSet(), skipped)
     }
 
     /** Parses a `SharedPreferences` XML backup entry (Android's own on-disk format: `<map>`

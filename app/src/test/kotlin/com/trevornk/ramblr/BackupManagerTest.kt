@@ -122,6 +122,34 @@ class BackupManagerTest {
         source.delete(); dest.delete(); existingTarget.delete()
     }
 
+    @Test fun `a truncated backup leaves every existing target file untouched`() {
+        val history = tempFile("history", "restored history\n")
+        val benchmark = tempFile("benchmark", (1..5000).joinToString("\n") { "line $it ${it * 7919 % 104729}" })
+        val dest = File.createTempFile("backup", ".zip").apply { deleteOnExit(); delete() }
+        BackupManager.zipFiles(dest, linkedMapOf(
+            BackupManager.ENTRY_DICTATION_HISTORY to history,
+            BackupManager.ENTRY_BENCHMARK_LOG to benchmark,
+        ))
+        val truncated = dest.readBytes().let { it.copyOf(it.size - 2000) }
+
+        val liveHistory = tempFile("live_history", "live history\n")
+        val liveBenchmark = tempFile("live_benchmark", "live benchmark\n")
+        val failed = runCatching {
+            BackupManager.unzipToTargets(truncated.inputStream(), mapOf(
+                BackupManager.ENTRY_DICTATION_HISTORY to liveHistory,
+                BackupManager.ENTRY_BENCHMARK_LOG to liveBenchmark,
+            ))
+        }
+
+        assertTrue(failed.isFailure)
+        assertEquals("live history\n", liveHistory.readText())
+        assertEquals("live benchmark\n", liveBenchmark.readText())
+        assertFalse(File(liveHistory.parentFile, "${liveHistory.name}.restoring").exists())
+        assertFalse(File(liveBenchmark.parentFile, "${liveBenchmark.name}.restoring").exists())
+
+        listOf(history, benchmark, dest, liveHistory, liveBenchmark).forEach { it.delete() }
+    }
+
     @Test fun `zipFiles never includes any of the three EncryptedSharedPreferences file names by construction`() {
         // targetFiles() is the single source of truth for what a backup contains; this asserts
         // its key set directly rather than exercising I/O, so it fails loudly if a future edit
