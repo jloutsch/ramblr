@@ -49,6 +49,7 @@ class InvocationActivity : BaseSettingsActivity() {
     private lateinit var advancedTierRowSub: TextView
     private lateinit var voiceKeyboardSectionSub: TextView
     private lateinit var voiceKeyboardRowSub: TextView
+    private lateinit var keyboardThemeRowSub: TextView
 
     /** The two screens this activity's rows are split across (see [EXTRA_SECTION]), as with
      *  BehaviorActivity: every row is built and refreshed on every launch, only the requested
@@ -105,6 +106,12 @@ class InvocationActivity : BaseSettingsActivity() {
         }
         voiceKeyboardRowSub = voiceKeyboardRow.findViewWithTag("subtitle")
         keyboard.addView(voiceKeyboardRow)
+
+        val keyboardThemeRow = settingsRow(getString(R.string.keyboard_theme_title), getString(KeyboardTheme.current(this).titleRes)) {
+            promptKeyboardTheme()
+        }
+        keyboardThemeRowSub = keyboardThemeRow.findViewWithTag("subtitle")
+        keyboard.addView(keyboardThemeRow)
 
         // The floating ring's own on/off switch lives on the Floating icon screen.
         shortcuts.addView(sectionHeader("How to start dictation"))
@@ -214,6 +221,22 @@ class InvocationActivity : BaseSettingsActivity() {
         val keyboardStatus = voiceKeyboardStatus()
         voiceKeyboardSectionSub.text = invocationVoiceKeyboardSectionSubtitleText(keyboardStatus)
         voiceKeyboardRowSub.text = invocationVoiceKeyboardSubtitleText(keyboardStatus)
+        keyboardThemeRowSub.text = getString(KeyboardTheme.current(this).titleRes)
+    }
+
+    /** The voice keyboard follows the system's dark mode unless told otherwise; it picks the
+     *  change up the next time it opens. */
+    private fun promptKeyboardTheme() {
+        val themes = KeyboardTheme.entries
+        android.app.AlertDialog.Builder(this)
+            .setTitle(R.string.keyboard_theme_title)
+            .setSingleChoiceItems(themes.map { getString(it.titleRes) }.toTypedArray(), themes.indexOf(KeyboardTheme.current(this))) { dialog, which ->
+                KeyboardTheme.set(this, themes[which])
+                refresh()
+                dialog.dismiss()
+            }
+            .setNegativeButton(R.string.keyboard_cancel, null)
+            .show()
     }
 
     // --- #238 voice keyboard --------------------------------------------------------------

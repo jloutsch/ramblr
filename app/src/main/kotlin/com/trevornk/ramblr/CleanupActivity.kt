@@ -46,6 +46,7 @@ class CleanupActivity : BaseSettingsActivity() {
     private lateinit var postProcessRowDetails: TextView
     private lateinit var perAppPersonaSwitch: MaterialSwitch
     private lateinit var rawTextRetrySwitch: MaterialSwitch
+    private lateinit var translationLanguagesRowSub: TextView
 
     private var pendingLocalCleanupSelection = false
     private val cleanupModelRows = mutableMapOf<String, ModelRowViews>()
@@ -196,6 +197,21 @@ class CleanupActivity : BaseSettingsActivity() {
             rawTextRetrySwitch.isChecked = newVal
         })
 
+        // Which languages are offered under "Translate to" on the Ramblr keyboard AND in the floating
+        // icon's long-press menu. Here, not under Voice keyboard: it is no longer keyboard-only, and
+        // translation runs on the cloud provider configured on this screen. Outside
+        // cleanupDetailContainer because translating works with cleanup switched off.
+        root.addView(sectionHeader(getString(R.string.translation_section_title)))
+        val translationLanguagesRow = settingsRow(
+            getString(R.string.keyboard_translation_languages_title),
+            KeyboardTranslation.summary(this),
+            details = getString(R.string.translation_languages_details),
+        ) {
+            TranslationLanguagesDialog.show(this) { refresh() }
+        }
+        translationLanguagesRowSub = translationLanguagesRow.findViewWithTag("subtitle")
+        root.addView(translationLanguagesRow)
+
         // #276: read-only "what will actually happen" line, matching TranscriptionActivity's.
         // Placed outside cleanupDetailContainer so it's visible even while cleanup itself is off
         // (in which case it just reads "Cleanup: Off").
@@ -231,6 +247,8 @@ class CleanupActivity : BaseSettingsActivity() {
 
         cloudLinkRowSub.text = CloudProviderActivity.subtitle(this)
         styleSummaryRowTitle.text = currentPersonaSummary()
+
+        translationLanguagesRowSub.text = KeyboardTranslation.summary(this)
 
         refreshWaterfallDependentUi()
         refreshAllCleanupRows()
