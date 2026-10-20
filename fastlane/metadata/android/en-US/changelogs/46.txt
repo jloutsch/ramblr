@@ -1,0 +1,8 @@
+Translate as you dictate, a tidier Settings screen, and more reliable on-device cleanup.
+
+- Translate to: pick a language from the keyboard or the floating icon's long-press menu.
+- Settings regrouped by task. Option to show the icon only while typing.
+- New Diplomatic style, themed icon, keyboard theme and mic waves.
+- On-device cleanup of long text fails less often and reports partial results honestly.
+
+Many of these came from rc55112. Thank you!
