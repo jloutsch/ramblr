@@ -253,6 +253,13 @@ class DataLogsActivity : BaseSettingsActivity() {
         thread {
             val result = try {
                 contentResolver.openInputStream(uri)?.use { input -> BackupManager.restoreBackup(this, input) }
+            } catch (e: java.util.zip.ZipException) {
+                // Zip errors surface while reading, before restoreBackup replaces any file.
+                runOnUiThread { toast("This backup file is damaged or incomplete. Nothing was changed.") }
+                return@thread
+            } catch (e: java.io.EOFException) {
+                runOnUiThread { toast("This backup file is damaged or incomplete. Nothing was changed.") }
+                return@thread
             } catch (e: Exception) {
                 runOnUiThread { toast("Couldn't restore: ${e.message}") }
                 return@thread
