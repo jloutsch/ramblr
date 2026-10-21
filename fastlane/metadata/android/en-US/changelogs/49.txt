@@ -1,0 +1,5 @@
+Fixes for the floating icon's long-press menu.
+
+- Fixed a crash when long-pressing the floating icon on a foldable's inner screen.
+- The menu no longer fills the whole screen with large text sizes; long menus scroll, and tapping outside always closes it.
+- Back now closes the menu.
