@@ -34,6 +34,9 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
 import android.widget.Toast
+import android.window.OnBackInvokedDispatcher
+import android.view.KeyEvent
+import android.os.Build
 import kotlin.concurrent.thread
 import kotlin.math.abs
 
@@ -274,6 +277,12 @@ open class WhisperAccessibilityService : AccessibilityService() {
         private const val BTN_DP = 44
         private const val PAD_DP = 10
         private const val MARGIN_DP = 8
+        // Screen height the long-press menu always leaves uncovered, so the dismiss scrim stays
+        // tappable no matter how many rows the menu has.
+        private const val STYLE_MENU_OUTSIDE_RESERVE_DP = 120
+        // Popup-sized cap on the long-press menu's width; long subtitles wrap rather than
+        // stretching the panel across the screen.
+        private const val STYLE_MENU_MAX_WIDTH_DP = 360
         /** Default/reference ring diameter that [BTN_DP]/[PAD_DP] are proportioned against; the
          *  actual on-screen size comes from [OverlayAppearancePrefs] (#43/#53) and is scaled by
          *  the same ratio, so an unconfigured install looks pixel-identical to before that setting
@@ -2321,16 +2330,47 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val ringSize = ringParams.width
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        val scrim = FrameLayout(this).apply { setOnClickListener { dismissStyleMenu() } }
+        // The scrim is focusable so the Back gesture/key reaches the menu and closes it, like any
+        // other popup. FLAG_ALT_FOCUSABLE_IM keeps it from becoming the IME target, so the app's
+        // keyboard isn't torn down just because the menu took focus.
+        val scrim = FrameLayout(this).apply {
+            setOnClickListener { dismissStyleMenu() }
+            isFocusable = true
+            isFocusableInTouchMode = true
+            setOnKeyListener { _, keyCode, event ->
+                if (keyCode != KeyEvent.KEYCODE_BACK) return@setOnKeyListener false
+                if (event.action == KeyEvent.ACTION_UP) dismissStyleMenu()
+                true
+            }
+        }
         val scrimParams = WindowManager.LayoutParams(
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.MATCH_PARENT,
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
-            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
+            WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM,
             PixelFormat.TRANSLUCENT
         ).apply { gravity = Gravity.TOP or Gravity.START }
 
-        val menu = content().apply {
+        val margin = (MARGIN_DP * dp).toInt()
+        val panel = content()
+        // The panel scrolls inside a height-capped viewport rather than growing past the screen
+        // (Z Fold8 crash/trap, see styleMenuMaxHeight). The rounded chrome moves to the viewport
+        // so the border frames what's visible instead of scrolling away with the rows.
+        val menu = BoundedScrollView(
+            this,
+            maxWidthPx = styleMenuMaxWidth(screenW, margin, (STYLE_MENU_MAX_WIDTH_DP * dp).toInt()),
+            maxHeightPx = styleMenuMaxHeight(screenH, margin, (STYLE_MENU_OUTSIDE_RESERVE_DP * dp).toInt()),
+        ).apply {
+            background = panel.background
+            setPadding(panel.paddingLeft, panel.paddingTop, panel.paddingRight, panel.paddingBottom)
+            panel.background = null
+            panel.setPadding(0, 0, 0, 0)
+            clipToOutline = true
+            isVerticalFadingEdgeEnabled = true
+            // Keep the scrollbar drawn whenever the rows overflow, so it's obvious there's more.
+            isScrollbarFadingEnabled = false
+            setFadingEdgeLength((24 * dp).toInt())
+            addView(panel)
             // Invisible until positioned (see menu.post below) -- WRAP_CONTENT's real size isn't
             // known until after this first layout pass, so the window is added at a provisional
             // ring-anchored x/y (usually the right screen edge) purely to let it measure itself.
@@ -2360,6 +2400,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
         try {
             wm.addView(scrim, scrimParams)
             styleMenuScrim = scrim
+            scrim.requestFocus()
+            // targetSdk 36 means predictive back: the gesture is delivered through the window's
+            // OnBackInvokedDispatcher rather than as KEYCODE_BACK, which the key listener above
+            // still covers for API 30-32 and hardware Back keys.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                scrim.findOnBackInvokedDispatcher()?.registerOnBackInvokedCallback(
+                    OnBackInvokedDispatcher.PRIORITY_DEFAULT
+                ) { dismissStyleMenu() }
+            }
             wm.addView(menu, menuParams)
             styleMenuView = menu
         } catch (e: WindowManager.BadTokenException) {
@@ -2413,13 +2462,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
         menuWidth: Int,
         menuHeight: Int
     ) {
-        val margin = (MARGIN_DP * dp).toInt()
-        menuParams.x = if (ringParams.x + ringSize / 2 > screenW / 2) {
-            (ringParams.x + ringSize - menuWidth).coerceAtLeast(margin)
-        } else {
-            ringParams.x.coerceAtMost(screenW - menuWidth - margin)
-        }
-        menuParams.y = (ringParams.y - menuHeight - margin).coerceIn(margin, screenH - menuHeight - margin)
+        val (x, y) = styleMenuPosition(
+            ringParams.x, ringParams.y, ringSize, menuWidth, menuHeight, screenW, screenH, (MARGIN_DP * dp).toInt()
+        )
+        menuParams.x = x
+        menuParams.y = y
     }
 
     /** The style menu's shared chrome (rounded translucent panel), extracted so the "Hide icon"
@@ -2445,7 +2492,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         // #312: the model (cleanup state, current style, the list) comes from the helper the
         // keyboard's picker also uses, so the two surfaces can never disagree.
-        val model = CleanupStyleMenu.load(this, currentForegroundPackageName())
+        // Read once, while building: once the menu's focusable scrim attaches it becomes the active
+        // window, so a read at tap time would name Ramblr itself instead of the app underneath.
+        val hostPackage = currentForegroundPackageName()
+        val model = CleanupStyleMenu.load(this, hostPackage)
         val cleanupEnabled = model.cleanupEnabled
         val cleanupIcon = getDrawable(R.drawable.ic_cleanup)?.mutate()?.apply {
             setTint(if (cleanupEnabled) COLOR_CLEANUP_ON else COLOR_CLEANUP_OFF)
@@ -2463,7 +2513,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         for (persona in model.personas) {
             val title = if (persona == model.current) "✓ ${persona.title}" else persona.title
             container.addView(styleMenuRow(icon = null, title = title, subtitle = persona.subtitle) {
-                onStyleMenuPersonaTapped(persona)
+                onStyleMenuPersonaTapped(persona, hostPackage)
             })
         }
 
@@ -2718,8 +2768,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
      * effect the moment cleanup is turned on) but the feedback bubble says so instead of claiming
      * cleanup is now running.
      */
-    private fun onStyleMenuPersonaTapped(persona: CleanupPersona) {
-        val selection = CleanupStyleMenu.select(this, currentForegroundPackageName(), persona)
+    private fun onStyleMenuPersonaTapped(persona: CleanupPersona, hostPackage: String?) {
+        val selection = CleanupStyleMenu.select(this, hostPackage, persona)
         dismissStyleMenu()
         showFeedback(
             if (selection.cleanupEnabled) "Style: ${persona.title}" else "Style: ${persona.title} (enable cleanup in Settings)",
