@@ -52,6 +52,8 @@ object BackupManager {
     const val ENTRY_QUALITY_LOG = "quality_log.jsonl"
     const val ENTRY_PREFS = "ramblr_prefs.xml"
 
+    private const val KEY_HISTORY_ENABLED = "dictation_history_enabled"
+
     /** Real on-disk name of the plain (non-encrypted) SharedPreferences file backing
      *  [BaseSettingsActivity.prefs] -- see that file's `getSharedPreferences("ramblr", ...)` call. */
     private const val PREFS_FILE_NAME = "ramblr.xml"
@@ -239,7 +241,11 @@ object BackupManager {
         }
         prefsXml?.let { xml ->
             val values = parsePrefsXml(xml)
-            val editor = context.getSharedPreferences("ramblr", Context.MODE_PRIVATE).edit().clear()
+            val prefs = context.getSharedPreferences("ramblr", Context.MODE_PRIVATE)
+            // A backup made before history was ever switched off has no key, and a missing key
+            // reads as on: keep it off rather than silently start saving dictations again.
+            val historyOff = !prefs.getBoolean(KEY_HISTORY_ENABLED, true)
+            val editor = prefs.edit().clear()
             values.forEach { (key, value) ->
                 when (value) {
                     is Boolean -> editor.putBoolean(key, value)
@@ -249,6 +255,7 @@ object BackupManager {
                     is String -> editor.putString(key, value)
                 }
             }
+            if (historyOff && KEY_HISTORY_ENABLED !in values) editor.putBoolean(KEY_HISTORY_ENABLED, false)
             editor.commit()
             restored += ENTRY_PREFS
             // unzipToTargets's first pass above never had ENTRY_PREFS in its targets map (it's
