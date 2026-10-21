@@ -107,8 +107,8 @@ android {
         applicationId = "com.trevornk.ramblr"
         minSdk = 30
         targetSdk = 36
-        versionCode = 47
-        versionName = "1.0.44"
+        versionCode = 48
+        versionName = "1.0.45"
 
         buildConfigField("String", "OMNIROUTE_BASE_URL", "\"$omniRouteBaseUrl\"")
 
