@@ -1,0 +1,9 @@
+Privacy and reliability fixes.
+
+- The floating icon no longer dictates into password fields.
+- "Tap to use raw text" replaces the cleaned text instead of adding to it.
+- Fixed a settings crash on some Samsung phones.
+- Choosing Local cleanup before the model downloads now finishes switching.
+- Safer backup restore, a 30-second clipboard fix, a cap on shared audio size, and a dependency update.
+
+Thanks to jloutsch for the reports and fixes.
