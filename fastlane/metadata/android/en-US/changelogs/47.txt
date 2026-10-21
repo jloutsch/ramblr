@@ -1,0 +1,5 @@
+Fixes turning off dictation history.
+
+- Closing the History pop-up now leaves you on the History screen, so "Save dictation history" can be switched off again. In 1.0.43 closing it returned to the main screen and the switch was out of reach.
+
+Thanks to jloutsch for the report and the fix.
