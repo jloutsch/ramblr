@@ -135,6 +135,8 @@ class AudioTranscriptionService : Service() {
     private val main = Handler(Looper.getMainLooper())
     private val running = AtomicBoolean(false)
     @Volatile private var latestStartId = 0
+    /** Set once the system times the service out: the worker must not pick up another job. */
+    @Volatile private var timedOut = false
     private var wakeLock: PowerManager.WakeLock? = null
     private var lastNotifyMs = 0L
 
@@ -167,7 +169,7 @@ class AudioTranscriptionService : Service() {
             AudioTranscriptionService.runner = runner
             while (true) {
                 val job = synchronized(running) {
-                    store.nextQueued().also { if (it == null) running.set(false) }
+                    (if (timedOut) null else store.nextQueued()).also { if (it == null) running.set(false) }
                 } ?: break
                 currentJobId = job.id
                 runner.run(job)
@@ -235,6 +237,7 @@ class AudioTranscriptionService : Service() {
 
     private fun handleTimeout() {
         Log.w(TAG, "System timed out the audio worker")
+        timedOut = true
         val id = currentJobId
         if (id != null) {
             AudioJobs.store(this).update(id, JobEvent.Failed(JobFailure.TIMED_OUT))?.let { onJobStatus(it) }

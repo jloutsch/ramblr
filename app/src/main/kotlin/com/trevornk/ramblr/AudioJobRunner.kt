@@ -24,6 +24,7 @@ internal class AudioJobRunner(
     private val store: AudioJobStore,
     private val isCancelled: (String) -> Boolean,
     private val onStatus: (AudioJob) -> Unit,
+    private val maxImportBytes: Long = MAX_IMPORT_BYTES,
 ) {
     private val filesDir: File get() = context.filesDir
     private val inFlight = InFlightCall()
@@ -195,10 +196,13 @@ internal class AudioJobRunner(
             input.use { src ->
                 tmp.outputStream().buffered(256 * 1024).use { out ->
                     val buf = ByteArray(256 * 1024)
+                    var copied = 0L
                     while (true) {
                         if (isCancelled(id)) throw Stop(null)
                         val n = src.read(buf)
                         if (n < 0) break
+                        copied += n
+                        if (copied > maxImportBytes) throw Stop(JobFailure.TOO_LARGE)
                         out.write(buf, 0, n)
                     }
                 }
@@ -355,6 +359,9 @@ internal class AudioJobRunner(
 
     companion object {
         private const val TAG = "AudioJob"
+
+        /** Any app can share audio here, and a sender can serve an endless stream. */
+        const val MAX_IMPORT_BYTES = 2L * 1024 * 1024 * 1024
 
         /** Best-effort display name for a content URI (never throws). */
         fun displayNameOf(context: Context, uri: Uri, fallback: String): String = try {
