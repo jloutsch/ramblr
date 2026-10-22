@@ -16,7 +16,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, ccr-5bf43386-v5ygei-sliver]  # TEMP: test APK builds for this branch; remove before merging
   pull_request:
     branches: [main]
 
