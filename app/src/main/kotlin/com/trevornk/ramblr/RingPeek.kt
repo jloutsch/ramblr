@@ -18,7 +18,7 @@ object RingPeek {
 
     /** Default visible sliver size in dp once peeked, used when the user hasn't overridden it via
      *  [PeekVisibleSize] in settings. */
-    const val PEEK_VISIBLE_DP = 20
+    const val PEEK_VISIBLE_DP = PeekVisibleSize.DEFAULT_DP
 
     /** Duration of the slide animation in either direction. */
     const val ANIM_DURATION_MS = 220L

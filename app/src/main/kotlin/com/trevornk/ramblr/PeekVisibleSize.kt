@@ -9,15 +9,17 @@ import android.content.SharedPreferences
  * easier-to-hit restore tap at the cost of a chunkier sliver poking in from the edge; this is
  * exactly the same size/reachability tradeoff that motivated bumping the shipped default up from
  * the original 14dp (too close to Android's minimum recommended 48dp touch target, and the direct
- * cause of the SchildiChat peek-restore bug -- see [RingPeek]'s gesture-exclusion doc) to
- * [DEFAULT_DP]. Only meaningful while [AutoPeekToggle] is on; this store doesn't gate anything
- * itself. Backed by the same "ramblr" prefs file as the other settings, following the
+ * cause of the SchildiChat peek-restore bug -- see [RingPeek]'s gesture-exclusion doc) to 20dp,
+ * and then to [DEFAULT_DP]: 20dp still left only a thin crescent of the 44dp button, easy to
+ * mistake for the ring having vanished on a dark background, while 28dp shows a solid piece of
+ * it. Only meaningful while [AutoPeekToggle] is on; this store doesn't gate anything itself.
+ * Backed by the same "ramblr" prefs file as the other settings, following the
  * same pattern as [AutoPeekDelay].
  */
 object PeekVisibleSize {
     private const val PREFS_NAME = "ramblr"
     const val KEY = "peek_visible_size_dp"
-    const val DEFAULT_DP = 20
+    const val DEFAULT_DP = 28
     const val MIN_DP = 8
     const val MAX_DP = 40
 

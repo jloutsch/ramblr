@@ -7,7 +7,7 @@ import org.junit.Test
 class PeekVisibleSizeTest {
 
     @Test fun `defaults to RingPeek's peek-visible size when never set`() {
-        assertEquals(20, PeekVisibleSize.dpOrDefault(FakeSharedPreferences()))
+        assertEquals(28, PeekVisibleSize.dpOrDefault(FakeSharedPreferences()))
     }
 
     @Test fun `reflects a previously stored value`() {
