@@ -1,83 +1,46 @@
 package com.trevornk.ramblr
 
-/**
- * True when a screen-size change looks like a fold/unfold transition -- a genuinely different
- * screen size -- rather than an ordinary rotation, which merely swaps width and height. Rotation
- * has never repositioned the overlay and isn't part of this fix (#41), so a plain W/H swap is left
- * alone to avoid an unrelated, unrequested jump.
- */
-fun isFoldSizeChange(oldW: Int, oldH: Int, newW: Int, newH: Int): Boolean {
-    if (oldW == newW && oldH == newH) return false
-    val isRotationSwap = oldW == newH && oldH == newW
-    return !isRotationSwap
-}
+import kotlin.math.roundToInt
 
 /**
- * Recomputes the ring's x after a fold/unfold screen-size change (#41), pinning it to the same
- * edge (left or right) it was closest to on the OLD screen -- the same rule the drag-release
- * handler already applies -- rather than re-testing the stale absolute x against the NEW screen's
- * midpoint, which would misclassify a ring pinned to the right edge of a small screen as
- * left-of-center once the screen is much wider.
- */
-fun snappedXForScreenChange(oldX: Int, oldScreenW: Int, newScreenW: Int, ringSize: Int, margin: Int): Int {
-    val wasNearRightEdge = oldX + ringSize / 2 > oldScreenW / 2
-    return if (wasNearRightEdge) newScreenW - ringSize - margin else margin
-}
-
-/**
- * Recomputes the ring's peeked window x after a fold/unfold screen-size change, given the
- * previous docked (fully visible) x it was peeking from. [snappedXForScreenChange] only knows how
- * to re-snap a DOCKED position to the new screen's edge; a peeked ring's actual window x is offset
- * from that docked position (see [RingPeek.peekedX]), so re-snapping the peeked x directly would
- * misclassify the edge for a screen size change (peeked windows sit almost entirely off-screen, so
- * their raw x is nowhere near either edge's midpoint test). This re-snaps the underlying docked x
- * instead, then re-derives the peeked x from that for the new screen -- keeping the ring visually
- * peeked, on the correct edge, at the correct sliver position after the transition.
+ * Where the user parked the floating ring, independent of screen size: which edge it hugs and how
+ * far down the screen its centre sits (0 = top, 1 = bottom).
  *
- * Returns the new (peeked x, new docked x) pair so the caller can update its own peek-restore
- * state ([prePeekX]) to match, instead of leaving it referencing the old screen's docked position.
+ * The ring's window x/y are derived from this on every screen-size change (rotation, fold/unfold,
+ * ring resize) and at overlay creation, and the anchor itself is only ever written when a drag
+ * settles. Deriving pixels from a fixed anchor -- rather than re-deriving the next pixel position
+ * from the last one -- is what keeps the ring from wandering: the old pixel-carrying approach left
+ * a right-edge portrait ring stranded mid-screen (and often below the bottom) after a rotation, so
+ * auto-peek then judged it "left of centre", and rotating back re-snapped it to the LEFT edge with
+ * its height clamped to the bottom. Each round trip through clamps and proportional rescaling moved
+ * it a little further from where the user's thumb wanted it.
  */
-fun peekedPositionForScreenChange(
-    oldDockedX: Int,
-    oldScreenW: Int,
-    newScreenW: Int,
-    ringSize: Int,
-    margin: Int,
-    peekVisiblePx: Int,
-    ringInsetPx: Int = 0,
-): Pair<Int, Int> {
-    val newDockedX = snappedXForScreenChange(oldDockedX, oldScreenW, newScreenW, ringSize, margin)
-    val newPeekedX = RingPeek.peekedX(newDockedX, newScreenW, ringSize, peekVisiblePx, ringInsetPx)
-    return newPeekedX to newDockedX
+data class RingAnchor(val rightEdge: Boolean, val centerYFraction: Float) {
+    companion object {
+        /** First run, before any drag: right edge, vertically centred. */
+        val DEFAULT = RingAnchor(rightEdge = true, centerYFraction = 0.5f)
+
+        /** The anchor for a docked ring window at [x]/[y] on a [screenW] x [screenH] screen. Uses
+         *  the same left/right split as the drag-release snap ([RingPeek.isSnappedToRightEdge]). */
+        fun fromPosition(x: Int, y: Int, screenW: Int, screenH: Int, ringSize: Int): RingAnchor {
+            val fraction = if (screenH <= 0) 0.5f else (y + ringSize / 2).toFloat() / screenH
+            return RingAnchor(RingPeek.isSnappedToRightEdge(x, screenW, ringSize), fraction.coerceIn(0f, 1f))
+        }
+    }
 }
 
 /**
- * Preserves the ring's vertical position proportionally across a fold/unfold screen-size change
- * (#41) -- e.g. a ring 30% down the old screen stays roughly 30% down the new one -- instead of
- * resetting to a hardcoded center, so a fold transition never fights a position the user dragged
- * to manually. Clamped to stay fully on-screen.
+ * The docked (fully visible) window x/y for [anchor] on a [screenW] x [screenH] screen: flush
+ * against the anchored edge, centre at the anchored fraction of the height, clamped so the whole
+ * ring stays on-screen (FLAG_LAYOUT_NO_LIMITS disables WindowManager's own clamping).
  */
-fun proportionalYForScreenChange(oldY: Int, oldScreenH: Int, newScreenH: Int, ringSize: Int, margin: Int): Int {
-    if (oldScreenH <= 0) return oldY
-    val oldCenterY = oldY + ringSize / 2
-    val ratio = oldCenterY.toFloat() / oldScreenH
-    val newCenterY = (ratio * newScreenH).toInt()
-    val maxY = (newScreenH - ringSize - margin).coerceAtLeast(margin)
-    return (newCenterY - ringSize / 2).coerceIn(margin, maxY)
-}
-
-/**
- * Clamps a persisted (SharedPreferences-restored) overlay x/y to the CURRENT screen's bounds
- * before it's used at overlay-creation time (service-recreation persistence fix). The saved
- * position was valid for whatever screen size was current when it was written, but the service
- * can be recreated after the screen size changed (app reinstalled onto a different device, a
- * fold-state change that raced the save, or a stale/corrupt saved value) -- using it unclamped
- * could park the ring partially or fully off-screen with no on-screen affordance to recover it.
- * Mirrors the same [Int.coerceIn] pattern already used by the drag-release y clamp (see the
- * ACTION_UP handler in WhisperAccessibilityService) rather than introducing new clamping rules.
- */
-fun clampRestoredPosition(x: Int, y: Int, screenW: Int, screenH: Int, ringSize: Int, margin: Int): Pair<Int, Int> {
-    val maxX = (screenW - ringSize - margin).coerceAtLeast(margin)
+fun dockedPositionFor(anchor: RingAnchor, screenW: Int, screenH: Int, ringSize: Int, margin: Int): Pair<Int, Int> {
+    val x = if (anchor.rightEdge) (screenW - ringSize - margin).coerceAtLeast(margin) else margin
     val maxY = (screenH - ringSize - margin).coerceAtLeast(margin)
-    return x.coerceIn(margin, maxX) to y.coerceIn(margin, maxY)
+    val y = ((anchor.centerYFraction * screenH).roundToInt() - ringSize / 2).coerceIn(margin, maxY)
+    return x to y
 }
+
+/** Anchors are kept per orientation, so a thumb spot chosen in portrait survives a drag made
+ *  while the phone was sideways. */
+fun isLandscape(screenW: Int, screenH: Int): Boolean = screenW > screenH

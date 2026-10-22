@@ -7,165 +7,99 @@ import org.junit.Test
 
 class OverlayRepositionTest {
 
-    // --- isFoldSizeChange ---
+    private val ringSize = 154
+    private val margin = 22
 
-    @Test fun `unchanged size is not a fold change`() {
-        assertFalse(isFoldSizeChange(oldW = 1080, oldH = 2364, newW = 1080, newH = 2364))
+    // Phone in portrait / landscape (a plain W/H swap), and a Pixel Fold's cover and inner screens.
+    private val portraitW = 1080
+    private val portraitH = 2400
+    private val landscapeW = 2400
+    private val landscapeH = 1080
+    private val innerW = 2076
+    private val innerH = 2152
+
+    // --- RingAnchor.fromPosition ---
+
+    @Test fun `a ring parked on the right edge anchors right`() {
+        val anchor = RingAnchor.fromPosition(portraitW - ringSize - margin, 1800, portraitW, portraitH, ringSize)
+        assertTrue(anchor.rightEdge)
+        assertEquals((1800 + ringSize / 2).toFloat() / portraitH, anchor.centerYFraction, 0.0001f)
     }
 
-    @Test fun `a plain width-height swap is treated as rotation, not a fold change`() {
-        assertFalse(isFoldSizeChange(oldW = 1080, oldH = 2364, newW = 2364, newH = 1080))
+    @Test fun `a ring parked on the left edge anchors left`() {
+        assertFalse(RingAnchor.fromPosition(margin, 600, portraitW, portraitH, ringSize).rightEdge)
     }
 
-    @Test fun `a genuinely different size is a fold change`() {
-        // Pixel Fold cover screen closed (1080x2364) to inner screen opened (2076x2152).
-        assertTrue(isFoldSizeChange(oldW = 1080, oldH = 2364, newW = 2076, newH = 2152))
+    @Test fun `the anchored fraction is clamped to the screen`() {
+        assertEquals(1f, RingAnchor.fromPosition(margin, 5000, portraitW, portraitH, ringSize).centerYFraction, 0f)
+        assertEquals(0f, RingAnchor.fromPosition(margin, -500, portraitW, portraitH, ringSize).centerYFraction, 0f)
     }
 
-    // --- snappedXForScreenChange ---
+    // --- dockedPositionFor ---
 
-    @Test fun `ring near the right edge stays pinned to the right edge on the new screen`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenW = 1080
-        val oldX = oldScreenW - ringSize - margin // pinned to right edge when closed
-        val newScreenW = 2076
-
-        val newX = snappedXForScreenChange(oldX, oldScreenW, newScreenW, ringSize, margin)
-
-        assertEquals(newScreenW - ringSize - margin, newX)
+    @Test fun `a drag-settled position round-trips through its anchor exactly`() {
+        val x = portraitW - ringSize - margin
+        val y = 1733
+        val anchor = RingAnchor.fromPosition(x, y, portraitW, portraitH, ringSize)
+        assertEquals(x to y, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
     }
 
-    @Test fun `ring near the left edge stays pinned to the left edge on the new screen`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenW = 1080
-        val oldX = margin // pinned to left edge
-        val newScreenW = 2076
-
-        val newX = snappedXForScreenChange(oldX, oldScreenW, newScreenW, ringSize, margin)
-
-        assertEquals(margin, newX)
+    @Test fun `the default anchor is the right edge, vertically centred`() {
+        val (x, y) = dockedPositionFor(RingAnchor.DEFAULT, portraitW, portraitH, ringSize, margin)
+        assertEquals(portraitW - ringSize - margin, x)
+        assertEquals(portraitH / 2 - ringSize / 2, y)
     }
 
-    // --- proportionalYForScreenChange ---
-
-    @Test fun `vertical position is preserved proportionally across a screen size change`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenH = 2364
-        val oldY = (oldScreenH * 0.3f - ringSize / 2).toInt() // ring centered 30% down the screen
-        val newScreenH = 2152
-
-        val newY = proportionalYForScreenChange(oldY, oldScreenH, newScreenH, ringSize, margin)
-        val newCenterRatio = (newY + ringSize / 2f) / newScreenH
-
-        assertEquals(0.3f, newCenterRatio, 0.01f)
+    @Test fun `a right-edge ring hugs the right edge of a wider screen`() {
+        val (x, _) = dockedPositionFor(RingAnchor(true, 0.5f), innerW, innerH, ringSize, margin)
+        assertEquals(innerW - ringSize - margin, x)
     }
 
-    @Test fun `vertical position is clamped within the new screen bounds`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenH = 2364
-        val oldY = oldScreenH - ringSize // ring centered near the very bottom
-        val newScreenH = 400 // a much shorter new screen
-
-        val newY = proportionalYForScreenChange(oldY, oldScreenH, newScreenH, ringSize, margin)
-
-        assertTrue(newY >= margin)
-        assertTrue(newY <= newScreenH - ringSize - margin)
+    @Test fun `a left-edge ring stays on the left edge`() {
+        val (x, _) = dockedPositionFor(RingAnchor(false, 0.5f), landscapeW, landscapeH, ringSize, margin)
+        assertEquals(margin, x)
     }
 
-    // --- peekedPositionForScreenChange ---
-
-    @Test fun `a peeked ring stays peeked on the correct edge after a fold change`() {
-        val ringSize = 168
-        val margin = 24
-        val peekVisiblePx = 60
-        val oldScreenW = 1080
-        val oldDockedX = oldScreenW - ringSize - margin // was docked to the right edge before peeking
-        val newScreenW = 2076
-
-        val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-            oldDockedX, oldScreenW, newScreenW, ringSize, margin, peekVisiblePx
-        )
-
-        // The re-derived docked x is still pinned to the right edge on the new screen.
-        assertEquals(newScreenW - ringSize - margin, newDockedX)
-        // The peeked x is the right-edge peek position for that docked x, not the docked x itself.
-        assertEquals(RingPeek.peekedX(newDockedX, newScreenW, ringSize, peekVisiblePx), newPeekedX)
-        assertEquals(newScreenW - peekVisiblePx, newPeekedX)
+    @Test fun `a ring anchored near the bottom stays fully on-screen`() {
+        val (_, y) = dockedPositionFor(RingAnchor(true, 1f), landscapeW, landscapeH, ringSize, margin)
+        assertEquals(landscapeH - ringSize - margin, y)
     }
 
-    @Test fun `a peeked ring on the left edge stays pinned left after a fold change`() {
-        val ringSize = 168
-        val margin = 24
-        val peekVisiblePx = 60
-        val oldScreenW = 1080
-        val oldDockedX = margin // was docked to the left edge before peeking
-        val newScreenW = 2076
-
-        val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-            oldDockedX, oldScreenW, newScreenW, ringSize, margin, peekVisiblePx
-        )
-
-        assertEquals(margin, newDockedX)
-        assertEquals(peekVisiblePx - ringSize, newPeekedX)
+    @Test fun `a ring anchored at the top stays fully on-screen`() {
+        val (_, y) = dockedPositionFor(RingAnchor(true, 0f), portraitW, portraitH, ringSize, margin)
+        assertEquals(margin, y)
     }
 
-    // --- clampRestoredPosition ---
+    // --- the wandering-ring bug ---
 
-    @Test fun `a restored position within current screen bounds is left unchanged`() {
-        val ringSize = 168
-        val margin = 24
-        val screenW = 1080
-        val screenH = 2364
-        val x = screenW - ringSize - margin
-        val y = screenH / 2 - ringSize / 2
+    @Test fun `rotating to landscape and back returns a low thumb-spot ring to exactly where it was`() {
+        // Right edge, low down where a right thumb reaches.
+        val start = portraitW - ringSize - margin to 1900
+        val anchor = RingAnchor.fromPosition(start.first, start.second, portraitW, portraitH, ringSize)
 
-        val (clampedX, clampedY) = clampRestoredPosition(x, y, screenW, screenH, ringSize, margin)
+        val (lx, ly) = dockedPositionFor(anchor, landscapeW, landscapeH, ringSize, margin)
+        // In landscape it hugs the right edge and is on-screen -- previously it kept x=904 (mid
+        // screen, so auto-peek slid it LEFT) and y=1900 (below the 1080px-tall screen).
+        assertEquals(landscapeW - ringSize - margin, lx)
+        assertTrue(ly + ringSize <= landscapeH)
+        assertTrue(RingPeek.isSnappedToRightEdge(lx, landscapeW, ringSize))
 
-        assertEquals(x, clampedX)
-        assertEquals(y, clampedY)
+        repeat(5) { dockedPositionFor(anchor, landscapeW, landscapeH, ringSize, margin) }
+        assertEquals(start, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
     }
 
-    @Test fun `a restored position saved for a wider old screen is clamped onto a narrower new screen`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenW = 2076
-        val x = oldScreenW - ringSize - margin // pinned to the right edge of the OLD, wider screen
-        val newScreenW = 1080
-        val newScreenH = 2364
-
-        val (clampedX, _) = clampRestoredPosition(x, margin, newScreenW, newScreenH, ringSize, margin)
-
-        assertTrue(clampedX <= newScreenW - ringSize - margin)
-        assertTrue(clampedX >= margin)
+    @Test fun `a fold and unfold returns the ring to exactly where it was`() {
+        val start = portraitW - ringSize - margin to 1500
+        val anchor = RingAnchor.fromPosition(start.first, start.second, portraitW, portraitH, ringSize)
+        val (ix, _) = dockedPositionFor(anchor, innerW, innerH, ringSize, margin)
+        assertEquals(innerW - ringSize - margin, ix)
+        assertEquals(start, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
     }
 
-    @Test fun `a restored position saved for a taller old screen is clamped onto a shorter new screen`() {
-        val ringSize = 168
-        val margin = 24
-        val oldScreenH = 2364
-        val y = oldScreenH - ringSize - margin // near the bottom of the OLD, taller screen
-        val newScreenW = 1080
-        val newScreenH = 400
-
-        val (_, clampedY) = clampRestoredPosition(margin, y, newScreenW, newScreenH, ringSize, margin)
-
-        assertTrue(clampedY <= newScreenH - ringSize - margin)
-        assertTrue(clampedY >= margin)
-    }
-
-    @Test fun `a stale negative restored position is clamped to the on-screen minimum`() {
-        val ringSize = 168
-        val margin = 24
-        val screenW = 1080
-        val screenH = 2364
-
-        val (clampedX, clampedY) = clampRestoredPosition(-500, -500, screenW, screenH, ringSize, margin)
-
-        assertEquals(margin, clampedX)
-        assertEquals(margin, clampedY)
+    @Test fun `landscape is wider than tall`() {
+        assertTrue(isLandscape(landscapeW, landscapeH))
+        assertFalse(isLandscape(portraitW, portraitH))
+        assertTrue(isLandscape(innerW + 200, innerH))
+        assertFalse(isLandscape(innerW, innerH))
     }
 }
