@@ -23,18 +23,18 @@ class PeekRotationTest {
     }
 
     @Test fun `peeked right-edge ring rotated to landscape peeks against the new right edge`() {
-        val x = peekedX(RingAnchor(true, 0.8f), 2400, 1080)
+        val x = peekedX(RingAnchor(true, true, 200), 2400, 1080)
         assertEquals(2400 - peekVisiblePx - inset, x)
     }
 
     @Test fun `peeked right-edge ring rotated back to portrait does not fall off the screen`() {
-        val x = peekedX(RingAnchor(true, 0.8f), 1080, 2400)
+        val x = peekedX(RingAnchor(true, true, 200), 1080, 2400)
         assertTrue("peeked x must be within the new screen", x < 1080)
         assertEquals(1080 - peekVisiblePx - inset, x)
     }
 
     @Test fun `a left-edge peeked ring survives rotation too`() {
-        assertEquals(peekVisiblePx - ringSize + inset, peekedX(RingAnchor(false, 0.5f), 2400, 1080))
-        assertEquals(peekVisiblePx - ringSize + inset, peekedX(RingAnchor(false, 0.5f), 1080, 2400))
+        assertEquals(peekVisiblePx - ringSize + inset, peekedX(RingAnchor(false, false, 600), 2400, 1080))
+        assertEquals(peekVisiblePx - ringSize + inset, peekedX(RingAnchor(false, false, 600), 1080, 2400))
     }
 }

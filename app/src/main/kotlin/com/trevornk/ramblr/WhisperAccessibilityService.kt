@@ -36,6 +36,7 @@ import android.widget.TextView
 import android.widget.Toast
 import kotlin.concurrent.thread
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** How a candidate node ended up receiving the text; drives whether/when the clipboard gets cleared. */
 enum class InjectMethod {
@@ -161,9 +162,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
          *  [RingAnchor]; now only read, once, as a fallback in [loadRingAnchor]. */
         private const val PREF_OVERLAY_X = "overlay_x"
         private const val PREF_OVERLAY_Y = "overlay_y"
-        /** Per-orientation [RingAnchor] keys; suffixed with "portrait" or "landscape". */
+        /** Per-orientation [RingAnchor] keys; suffixed with "portrait" or "landscape". The gap is
+         *  stored in dp so a display-size (density) change keeps the same physical spot. */
         private const val PREF_ANCHOR_RIGHT_PREFIX = "overlay_anchor_right_"
-        private const val PREF_ANCHOR_Y_PREFIX = "overlay_anchor_y_"
+        private const val PREF_ANCHOR_BOTTOM_PREFIX = "overlay_anchor_bottom_"
+        private const val PREF_ANCHOR_GAP_DP_PREFIX = "overlay_anchor_gap_dp_"
 
         /** Current [RecordingStateMachine.State] of the running service, or null if the service
          *  isn't connected at all (mirrors the existing `instance?.` null-safe read pattern used
@@ -1223,8 +1226,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
         ).apply {
             gravity = Gravity.TOP or Gravity.START
             // Start where the user last parked the ring (#101), re-derived for the CURRENT screen
-            // from its saved anchor, so a service recreation in either orientation lands on the
-            // same edge and height. A fresh install falls back to right edge, vertically centred.
+            // from its saved corner anchor, so a service recreation in either orientation lands in the
+            // same corner. A fresh install falls back to right edge, vertically centred.
             val (dockedX, dockedY) = dockedPositionFor(loadRingAnchor(), screenW, screenH, ringSize, margin)
             x = dockedX
             y = dockedY
@@ -3640,20 +3643,23 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val suffix = if (isLandscape(screenW, screenH)) "landscape" else "portrait"
         prefs().edit()
             .putBoolean("$PREF_ANCHOR_RIGHT_PREFIX$suffix", anchor.rightEdge)
-            .putFloat("$PREF_ANCHOR_Y_PREFIX$suffix", anchor.centerYFraction)
+            .putBoolean("$PREF_ANCHOR_BOTTOM_PREFIX$suffix", anchor.bottomAnchored)
+            .putFloat("$PREF_ANCHOR_GAP_DP_PREFIX$suffix", anchor.edgeGapPx / dp)
             .apply()
     }
 
     /** The anchor for the current orientation, falling back to the other orientation's (a spot
      *  only ever set in portrait still applies sideways), then to a pre-anchor saved pixel position
-     *  from older versions, then to [RingAnchor.DEFAULT]. */
-    private fun loadRingAnchor(): RingAnchor {
+     *  from older versions, then null (the right-edge, centred first-run default). */
+    private fun loadRingAnchor(): RingAnchor? {
         val prefs = prefs()
         fun stored(suffix: String): RingAnchor? {
             val rightKey = "$PREF_ANCHOR_RIGHT_PREFIX$suffix"
-            val yKey = "$PREF_ANCHOR_Y_PREFIX$suffix"
-            if (!prefs.contains(rightKey) || !prefs.contains(yKey)) return null
-            return RingAnchor(prefs.getBoolean(rightKey, true), prefs.getFloat(yKey, 0.5f).coerceIn(0f, 1f))
+            val bottomKey = "$PREF_ANCHOR_BOTTOM_PREFIX$suffix"
+            val gapKey = "$PREF_ANCHOR_GAP_DP_PREFIX$suffix"
+            if (!prefs.contains(rightKey) || !prefs.contains(bottomKey) || !prefs.contains(gapKey)) return null
+            val gapPx = (prefs.getFloat(gapKey, 0f) * dp).roundToInt().coerceAtLeast(0)
+            return RingAnchor(prefs.getBoolean(rightKey, true), prefs.getBoolean(bottomKey, false), gapPx)
         }
         val (current, other) = if (isLandscape(screenW, screenH)) "landscape" to "portrait" else "portrait" to "landscape"
         stored(current)?.let { return it }
@@ -3664,7 +3670,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val ringSize = (OverlayAppearancePrefs.load(this).ringSizeDp * dp).toInt()
             return RingAnchor.fromPosition(legacyX, legacyY, screenW, screenH, ringSize)
         }
-        return RingAnchor.DEFAULT
+        return null
     }
 
     private fun toast(msg: String) { handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } }

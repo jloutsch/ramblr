@@ -20,60 +20,70 @@ class OverlayRepositionTest {
 
     // --- RingAnchor.fromPosition ---
 
-    @Test fun `a ring parked on the right edge anchors right`() {
-        val anchor = RingAnchor.fromPosition(portraitW - ringSize - margin, 1800, portraitW, portraitH, ringSize)
-        assertTrue(anchor.rightEdge)
-        assertEquals((1800 + ringSize / 2).toFloat() / portraitH, anchor.centerYFraction, 0.0001f)
+    @Test fun `a ring parked low on the left anchors to the bottom-left corner`() {
+        val y = portraitH - ringSize - 120
+        val anchor = RingAnchor.fromPosition(margin, y, portraitW, portraitH, ringSize)
+        assertEquals(RingAnchor(rightEdge = false, bottomAnchored = true, edgeGapPx = 120), anchor)
     }
 
-    @Test fun `a ring parked on the left edge anchors left`() {
-        assertFalse(RingAnchor.fromPosition(margin, 600, portraitW, portraitH, ringSize).rightEdge)
+    @Test fun `a ring parked high on the right anchors to the top-right corner`() {
+        val anchor = RingAnchor.fromPosition(portraitW - ringSize - margin, 300, portraitW, portraitH, ringSize)
+        assertEquals(RingAnchor(rightEdge = true, bottomAnchored = false, edgeGapPx = 300), anchor)
     }
 
-    @Test fun `the anchored fraction is clamped to the screen`() {
-        assertEquals(1f, RingAnchor.fromPosition(margin, 5000, portraitW, portraitH, ringSize).centerYFraction, 0f)
-        assertEquals(0f, RingAnchor.fromPosition(margin, -500, portraitW, portraitH, ringSize).centerYFraction, 0f)
+    @Test fun `a position past the screen edge anchors with no gap`() {
+        assertEquals(0, RingAnchor.fromPosition(margin, 5000, portraitW, portraitH, ringSize).edgeGapPx)
+        assertEquals(0, RingAnchor.fromPosition(margin, -500, portraitW, portraitH, ringSize).edgeGapPx)
     }
 
     // --- dockedPositionFor ---
 
     @Test fun `a drag-settled position round-trips through its anchor exactly`() {
-        val x = portraitW - ringSize - margin
-        val y = 1733
-        val anchor = RingAnchor.fromPosition(x, y, portraitW, portraitH, ringSize)
-        assertEquals(x to y, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
+        for (y in listOf(margin, 600, 1733, portraitH - ringSize - margin)) {
+            val x = portraitW - ringSize - margin
+            val anchor = RingAnchor.fromPosition(x, y, portraitW, portraitH, ringSize)
+            assertEquals(x to y, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
+        }
     }
 
-    @Test fun `the default anchor is the right edge, vertically centred`() {
-        val (x, y) = dockedPositionFor(RingAnchor.DEFAULT, portraitW, portraitH, ringSize, margin)
+    @Test fun `no anchor yet is the right edge, vertically centred`() {
+        val (x, y) = dockedPositionFor(null, portraitW, portraitH, ringSize, margin)
         assertEquals(portraitW - ringSize - margin, x)
         assertEquals(portraitH / 2 - ringSize / 2, y)
     }
 
     @Test fun `a right-edge ring hugs the right edge of a wider screen`() {
-        val (x, _) = dockedPositionFor(RingAnchor(true, 0.5f), innerW, innerH, ringSize, margin)
+        val (x, _) = dockedPositionFor(RingAnchor(true, true, 100), innerW, innerH, ringSize, margin)
         assertEquals(innerW - ringSize - margin, x)
     }
 
-    @Test fun `a left-edge ring stays on the left edge`() {
-        val (x, _) = dockedPositionFor(RingAnchor(false, 0.5f), landscapeW, landscapeH, ringSize, margin)
-        assertEquals(margin, x)
-    }
-
-    @Test fun `a ring anchored near the bottom stays fully on-screen`() {
-        val (_, y) = dockedPositionFor(RingAnchor(true, 1f), landscapeW, landscapeH, ringSize, margin)
+    @Test fun `a gap smaller than the margin is clamped onto the screen`() {
+        val (_, y) = dockedPositionFor(RingAnchor(true, true, 0), landscapeW, landscapeH, ringSize, margin)
         assertEquals(landscapeH - ringSize - margin, y)
+        val (_, top) = dockedPositionFor(RingAnchor(true, false, 0), landscapeW, landscapeH, ringSize, margin)
+        assertEquals(margin, top)
     }
 
-    @Test fun `a ring anchored at the top stays fully on-screen`() {
-        val (_, y) = dockedPositionFor(RingAnchor(true, 0f), portraitW, portraitH, ringSize, margin)
-        assertEquals(margin, y)
+    @Test fun `a mid-screen ring on a tall screen stays mid-screen on a short one`() {
+        // Top-anchored 1000px down a 2400px portrait screen: in 1080px landscape it must not be
+        // shoved down onto the bottom edge.
+        val (_, y) = dockedPositionFor(RingAnchor(true, false, 1000), landscapeW, landscapeH, ringSize, margin)
+        assertEquals((landscapeH - ringSize) / 2, y)
     }
 
     // --- the wandering-ring bug ---
 
-    @Test fun `rotating to landscape and back returns a low thumb-spot ring to exactly where it was`() {
-        // Right edge, low down where a right thumb reaches.
+    @Test fun `a bottom-left ring stays the same distance above the bottom in every orientation`() {
+        val gap = 90
+        val start = margin to portraitH - ringSize - gap
+        val anchor = RingAnchor.fromPosition(start.first, start.second, portraitW, portraitH, ringSize)
+
+        assertEquals(margin to landscapeH - ringSize - gap, dockedPositionFor(anchor, landscapeW, landscapeH, ringSize, margin))
+        assertEquals(margin to innerH - ringSize - gap, dockedPositionFor(anchor, innerW, innerH, ringSize, margin))
+        assertEquals(start, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
+    }
+
+    @Test fun `rotating to landscape and back returns a right-thumb ring to exactly where it was`() {
         val start = portraitW - ringSize - margin to 1900
         val anchor = RingAnchor.fromPosition(start.first, start.second, portraitW, portraitH, ringSize)
 
@@ -84,15 +94,6 @@ class OverlayRepositionTest {
         assertTrue(ly + ringSize <= landscapeH)
         assertTrue(RingPeek.isSnappedToRightEdge(lx, landscapeW, ringSize))
 
-        repeat(5) { dockedPositionFor(anchor, landscapeW, landscapeH, ringSize, margin) }
-        assertEquals(start, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
-    }
-
-    @Test fun `a fold and unfold returns the ring to exactly where it was`() {
-        val start = portraitW - ringSize - margin to 1500
-        val anchor = RingAnchor.fromPosition(start.first, start.second, portraitW, portraitH, ringSize)
-        val (ix, _) = dockedPositionFor(anchor, innerW, innerH, ringSize, margin)
-        assertEquals(innerW - ringSize - margin, ix)
         assertEquals(start, dockedPositionFor(anchor, portraitW, portraitH, ringSize, margin))
     }
 
