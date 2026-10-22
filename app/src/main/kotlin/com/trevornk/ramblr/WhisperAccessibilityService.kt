@@ -36,6 +36,7 @@ import android.widget.TextView
 import android.widget.Toast
 import kotlin.concurrent.thread
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 /** How a candidate node ended up receiving the text; drives whether/when the clipboard gets cleared. */
 enum class InjectMethod {
@@ -157,9 +158,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
          *  [InvocationServiceMode.activeComponent] for that. */
         var instance: WhisperAccessibilityService? = null
 
-        /** SharedPreferences keys for the persisted overlay drag position (#101). */
+        /** SharedPreferences keys for the overlay drag position (#101) as saved before
+         *  [RingAnchor]; now only read, once, as a fallback in [loadRingAnchor]. */
         private const val PREF_OVERLAY_X = "overlay_x"
         private const val PREF_OVERLAY_Y = "overlay_y"
+        /** Per-orientation [RingAnchor] keys; suffixed with "portrait" or "landscape". The gap is
+         *  stored in dp so a display-size (density) change keeps the same physical spot. */
+        private const val PREF_ANCHOR_RIGHT_PREFIX = "overlay_anchor_right_"
+        private const val PREF_ANCHOR_BOTTOM_PREFIX = "overlay_anchor_bottom_"
+        private const val PREF_ANCHOR_GAP_DP_PREFIX = "overlay_anchor_gap_dp_"
 
         /** Current [RecordingStateMachine.State] of the running service, or null if the service
          *  isn't connected at all (mirrors the existing `instance?.` null-safe read pattern used
@@ -747,8 +754,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private var pendingPostPeekAction: Runnable? = null
     private val idlePeekRunnable = Runnable { attemptAutoPeek() }
     // screenW/screenH as of the last time the ring's position was computed (#41) -- the baseline
-    // handleScreenSizeChange() diffs against to detect a fold/unfold. Set alongside layoutParams
-    // in showOverlay() and kept in sync every time it repositions the ring.
+    // handleScreenSizeChange() diffs against to skip config changes that didn't resize the screen.
+    // Set alongside layoutParams in showOverlay() and kept in sync every time it repositions the ring.
     private var lastScreenW = 0
     private var lastScreenH = 0
 
@@ -1218,23 +1225,12 @@ open class WhisperAccessibilityService : AccessibilityService() {
             PixelFormat.TRANSLUCENT
         ).apply {
             gravity = Gravity.TOP or Gravity.START
-            // Restore the last dragged position across a service recreation (OS kill/restart,
-            // app update, etc. -- see #101) instead of always resetting to the hardcoded
-            // right-edge/vertical-center default. The saved value is sanity-clamped to the
-            // CURRENT screen bounds via clampRestoredPosition (shared with the drag-release
-            // clamp pattern) since the screen size may have changed since it was saved. Only a
-            // true first-run/fresh-install (no saved value yet) falls through to the hardcoded
-            // default.
-            val savedX = prefs().getInt(PREF_OVERLAY_X, Int.MIN_VALUE)
-            val savedY = prefs().getInt(PREF_OVERLAY_Y, Int.MIN_VALUE)
-            if (savedX != Int.MIN_VALUE && savedY != Int.MIN_VALUE) {
-                val (clampedX, clampedY) = clampRestoredPosition(savedX, savedY, screenW, screenH, ringSize, margin)
-                x = clampedX
-                y = clampedY
-            } else {
-                x = screenW - ringSize - margin
-                y = screenH / 2 - ringSize / 2
-            }
+            // Start where the user last parked the ring (#101), re-derived for the CURRENT screen
+            // from its saved corner anchor, so a service recreation in either orientation lands in the
+            // same corner. A fresh install falls back to right edge, vertically centred.
+            val (dockedX, dockedY) = dockedPositionFor(loadRingAnchor(), screenW, screenH, ringSize, margin)
+            x = dockedX
+            y = dockedY
         }
         lastScreenW = screenW
         lastScreenH = screenH
@@ -1295,12 +1291,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 positionFeedback(it, params, feedbackView?.height ?: 0)
                 wm.updateViewLayout(feedbackView, it)
             }
-            // Persist the newly-settled drag position (#101) so it survives a later
-            // service recreation instead of only living in this in-memory params
-            // object. Deliberately NOT called from ACTION_MOVE (would fire on every
-            // drag frame) -- only here, once the gesture has actually finalized a
-            // resting position.
-            persistOverlayPosition(params.x, params.y)
+            // Save the settled spot (#101) as this orientation's anchor. Deliberately NOT
+            // called from ACTION_MOVE (would fire on every drag frame) -- only here, once
+            // the gesture has actually finalized a resting position.
+            persistRingAnchor(params.x, params.y, ringSize)
         }
 
         overlay.setOnTouchListener { v, ev ->
@@ -1531,83 +1525,28 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private fun dpScaledToRing(valueDp: Int, ringSizeDp: Int): Int = valueDp * ringSizeDp / RING_DP
 
     /**
-     * Reacts to a screen-size change delivered via [onConfigurationChanged] -- on a Pixel Fold
-     * this fires for both a fold/unfold and an ordinary rotation, so [isFoldSizeChange] is used to
-     * ignore a plain width/height swap (rotation has never repositioned the overlay, and this fix
-     * (#41) is scoped to fold/unfold only). On a genuine fold-driven size change, the ring is
-     * re-snapped to whichever edge it was already closest to and its y position is preserved
-     * proportionally (rather than fought back to center) using the same [snappedXForScreenChange]/
-     * [proportionalYForScreenChange] logic covered by unit tests -- then the feedback bubble is
+     * Reacts to a screen-size change delivered via [onConfigurationChanged] -- rotation as well as
+     * a Pixel Fold fold/unfold. Every size change re-derives the ring from the user's saved
+     * [RingAnchor] for the new orientation via [applyAnchoredPosition], then the feedback bubble is
      * re-derived from the ring's new params exactly as drag-to-reposition already does, via
      * [positionFeedback]. Any open style menu (#53) is dismissed rather than repositioned, since
      * its anchor math would otherwise go stale mid-fold.
      *
-     * Peek-aware (fold/peek interaction bug, reported by Trevor): [snappedXForScreenChange] always
-     * computes the DOCKED (fully visible) edge position -- fine when the ring isn't peeked, but
-     * wrong while it is. Before this fix, a fold/unfold while peeked forced the ring to that docked
-     * position on the new screen size while leaving [isPeeked] stuck true and [prePeekX] stuck at
-     * the OLD screen's docked x. That desync caused two bugs: (1) the next tap saw isPeeked==true
-     * and called [restoreFromPeek] using the stale, wrong-screen prePeekX, producing a pointless
-     * slide that looked like the ring "disappeared and came back"; (2) [attemptAutoPeek] bails
-     * immediately whenever isPeeked is true, so auto-peek could never fire again until the service
-     * restarted. Now, while peeked, [prePeekX] itself (the underlying docked x) is re-snapped for
-     * the new screen size, and the ring's actual window x is re-derived as the PEEKED position for
-     * that new docked x via [RingPeek.peekedX] -- so a fold/unfold while peeked keeps the ring
-     * peeked, correctly positioned for the new screen, with isPeeked/prePeekX staying consistent.
+     * Rotation used to be left alone for a docked ring (#41), which is what made the ring wander:
+     * a right-edge portrait ring kept its pixel x/y in landscape, sitting mid-screen and often
+     * below the bottom edge; auto-peek then judged it left of centre and peeked it left, and
+     * rotating back re-snapped it to the left edge with its y clamped to the bottom. Deriving from
+     * the anchor every time means a round trip always lands back exactly where it started, peeked
+     * or not (#128: a peeked ring stays peeked, against the new screen's edge).
      */
     private fun handleScreenSizeChange() {
         dismissStyleMenu()
         val params = layoutParams ?: return
-        val newScreenW = screenW
-        val newScreenH = screenH
-        if (!isFoldSizeChange(lastScreenW, lastScreenH, newScreenW, newScreenH)) {
-            // A plain rotation still never repositions a DOCKED ring (unchanged, #41) -- but a
-            // PEEKED ring's window x is defined relative to a screen edge that just moved (#128).
-            // Leaving it alone strands the sliver mid-screen (portrait -> landscape) or entirely
-            // past the new, narrower edge (landscape -> portrait) while isPeeked stays true, so
-            // the next tap lands on nothing and silently does nothing.
-            if (isPeeked && (newScreenW != lastScreenW)) {
-                val ringSize = params.width
-                val margin = (MARGIN_DP * dp).toInt()
-                val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-                val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                    prePeekX ?: params.x, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
-                )
-                prePeekX = newDockedX
-                params.x = newPeekedX
-                params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
-                Log.i(TAG, "Rotation while peeked: re-derived x=$newPeekedX (docked $newDockedX) for ${newScreenW}px screen")
-                val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-                handler.post {
-                    overlayView?.let { wm.updateViewLayout(it, params) }
-                    feedbackLayoutParams?.let {
-                        positionFeedback(it, params, feedbackView?.height ?: 0)
-                        wm.updateViewLayout(feedbackView, it)
-                    }
-                }
-            }
-            lastScreenW = newScreenW
-            lastScreenH = newScreenH
-            return
-        }
-
-        val ringSize = params.width
-        val margin = (MARGIN_DP * dp).toInt()
-
-        if (isPeeked) {
-            val oldDockedX = prePeekX ?: params.x
-            val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-            val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
-            )
-            prePeekX = newDockedX
-            params.x = newPeekedX
-        } else {
-            params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin)
-        }
-        params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
-        lastScreenW = newScreenW
-        lastScreenH = newScreenH
+        if (screenW == lastScreenW && screenH == lastScreenH) return
+        lastScreenW = screenW
+        lastScreenH = screenH
+        applyAnchoredPosition(params)
+        Log.i(TAG, "Screen size changed to ${screenW}x$screenH: ring x=${params.x} y=${params.y} peeked=$isPeeked")
 
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         // Deferred via handler.post (Pixel Fold display-transition stall, same root cause as
@@ -1627,10 +1566,28 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 wm.updateViewLayout(feedbackView, it)
             }
         }
-        // Persist the fold/unfold-settled position (#101) so a subsequent service recreation
-        // restores here rather than the hardcoded default -- mirrors the drag-release persist
-        // above.
-        persistOverlayPosition(params.x, params.y)
+    }
+
+    /**
+     * Moves [params] to the saved [RingAnchor] for the current screen (docked, or peeked against
+     * the anchored edge while [isPeeked], with [prePeekX] kept as the docked x to restore to).
+     * Only mutates [params]; the caller applies it to the window. Never persists anything -- the
+     * anchor is written only when a drag settles, so repeated re-derivation can't drift.
+     */
+    private fun applyAnchoredPosition(params: WindowManager.LayoutParams) {
+        val ringSize = params.width
+        val margin = (MARGIN_DP * dp).toInt()
+        val (dockedX, dockedY) = dockedPositionFor(loadRingAnchor(), screenW, screenH, ringSize, margin)
+        // An in-flight peek/restore animation would otherwise keep writing its old-screen target x.
+        peekAnimator?.cancel()
+        if (isPeeked) {
+            val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
+            prePeekX = dockedX
+            params.x = RingPeek.peekedX(dockedX, screenW, ringSize, peekVisiblePx, ringInsetPx())
+        } else {
+            params.x = dockedX
+        }
+        params.y = dockedY
     }
 
     /**
@@ -2087,6 +2044,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
             params.width = ringSize
             params.height = ringSize
+            // Re-derive x/y for the new size so a right-edge ring stays flush with the edge
+            // instead of growing past it (or shrinking away from it).
+            applyAnchoredPosition(params)
             wm.updateViewLayout(overlay, params)
 
             (ring.layoutParams as FrameLayout.LayoutParams).apply { width = buttonSize; height = buttonSize }
@@ -3673,14 +3633,44 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private fun prefs() = getSharedPreferences("ramblr", MODE_PRIVATE)
 
     /**
-     * Writes the overlay's current x/y to [prefs] (#101) so it survives a service recreation
-     * (OS kill/restart, app update, etc.) instead of resetting to the hardcoded default. Called
-     * only from the drag-release and fold/unfold-settle points where a gesture/transition has
-     * actually finalized a resting position -- never from ACTION_MOVE, which would otherwise
-     * write on every drag frame.
+     * Saves where a drag just settled the ring (#101) as a [RingAnchor] for the current
+     * orientation, so it survives a service recreation (OS kill/restart, app update, etc.) and
+     * every rotation/fold. Called only when a drag settles -- never from ACTION_MOVE, which would
+     * write on every drag frame, and never from a screen-size change, which only reads the anchor.
      */
-    private fun persistOverlayPosition(x: Int, y: Int) {
-        prefs().edit().putInt(PREF_OVERLAY_X, x).putInt(PREF_OVERLAY_Y, y).apply()
+    private fun persistRingAnchor(x: Int, y: Int, ringSize: Int) {
+        val anchor = RingAnchor.fromPosition(x, y, screenW, screenH, ringSize)
+        val suffix = if (isLandscape(screenW, screenH)) "landscape" else "portrait"
+        prefs().edit()
+            .putBoolean("$PREF_ANCHOR_RIGHT_PREFIX$suffix", anchor.rightEdge)
+            .putBoolean("$PREF_ANCHOR_BOTTOM_PREFIX$suffix", anchor.bottomAnchored)
+            .putFloat("$PREF_ANCHOR_GAP_DP_PREFIX$suffix", anchor.edgeGapPx / dp)
+            .apply()
+    }
+
+    /** The anchor for the current orientation, falling back to the other orientation's (a spot
+     *  only ever set in portrait still applies sideways), then to a pre-anchor saved pixel position
+     *  from older versions, then null (the right-edge, centred first-run default). */
+    private fun loadRingAnchor(): RingAnchor? {
+        val prefs = prefs()
+        fun stored(suffix: String): RingAnchor? {
+            val rightKey = "$PREF_ANCHOR_RIGHT_PREFIX$suffix"
+            val bottomKey = "$PREF_ANCHOR_BOTTOM_PREFIX$suffix"
+            val gapKey = "$PREF_ANCHOR_GAP_DP_PREFIX$suffix"
+            if (!prefs.contains(rightKey) || !prefs.contains(bottomKey) || !prefs.contains(gapKey)) return null
+            val gapPx = (prefs.getFloat(gapKey, 0f) * dp).roundToInt().coerceAtLeast(0)
+            return RingAnchor(prefs.getBoolean(rightKey, true), prefs.getBoolean(bottomKey, false), gapPx)
+        }
+        val (current, other) = if (isLandscape(screenW, screenH)) "landscape" to "portrait" else "portrait" to "landscape"
+        stored(current)?.let { return it }
+        stored(other)?.let { return it }
+        val legacyX = prefs.getInt(PREF_OVERLAY_X, Int.MIN_VALUE)
+        val legacyY = prefs.getInt(PREF_OVERLAY_Y, Int.MIN_VALUE)
+        if (legacyX != Int.MIN_VALUE && legacyY != Int.MIN_VALUE) {
+            val ringSize = (OverlayAppearancePrefs.load(this).ringSizeDp * dp).toInt()
+            return RingAnchor.fromPosition(legacyX, legacyY, screenW, screenH, ringSize)
+        }
+        return null
     }
 
     private fun toast(msg: String) { handler.post { Toast.makeText(this, msg, Toast.LENGTH_SHORT).show() } }
