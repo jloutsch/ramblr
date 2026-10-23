@@ -922,13 +922,15 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private val historyStore by lazy { DictationHistoryStore.forContext(this) }
 
     private val dp get() = resources.displayMetrics.density
-    // #352: overlay x/y start after the display cutout and the frame runs under the nav bar, so
-    // both come out of the size; the full display size put a peeked ring past the landscape edge.
+    // #352: overlay x/y start after a left/top display cutout but not after a left/top nav bar, so
+    // only those two come out of the size: the leading cutout, and the trailing nav bar the ring
+    // would otherwise draw over. The full display size put a peeked ring past the landscape edge.
     private fun windowInsets(types: Int) = (getSystemService(WINDOW_SERVICE) as WindowManager)
         .currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(types)
-    private val overlayInsets get() = windowInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.displayCutout())
-    private val screenW get() = resources.displayMetrics.widthPixels - overlayInsets.let { it.left + it.right }
-    private val screenH get() = resources.displayMetrics.heightPixels - overlayInsets.let { it.top + it.bottom }
+    private val screenW get() = resources.displayMetrics.widthPixels -
+        windowInsets(WindowInsets.Type.displayCutout()).left - windowInsets(WindowInsets.Type.navigationBars()).right
+    private val screenH get() = resources.displayMetrics.heightPixels -
+        windowInsets(WindowInsets.Type.displayCutout()).top - windowInsets(WindowInsets.Type.navigationBars()).bottom
 
     override fun onServiceConnected() {
         DictationTextWriter.diagnostic = { Log.w(TAG, it) }
