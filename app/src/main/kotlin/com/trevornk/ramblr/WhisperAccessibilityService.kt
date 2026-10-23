@@ -931,6 +931,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
         windowInsets(WindowInsets.Type.displayCutout()).left - windowInsets(WindowInsets.Type.navigationBars()).right
     private val screenH get() = resources.displayMetrics.heightPixels -
         windowInsets(WindowInsets.Type.displayCutout()).top - windowInsets(WindowInsets.Type.navigationBars()).bottom
+    // The usable left edge: past a left nav bar, since x=0 lies under it.
+    private val screenLeft get() = (windowInsets(WindowInsets.Type.navigationBars()).left -
+        windowInsets(WindowInsets.Type.displayCutout()).left).coerceAtLeast(0)
+    // The display's real left edge, where a left peek goes: x=0 starts after a left cutout.
+    private val displayLeft get() = -windowInsets(WindowInsets.Type.displayCutout()).left
 
     override fun onServiceConnected() {
         DictationTextWriter.diagnostic = { Log.w(TAG, it) }
@@ -1304,7 +1309,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val savedX = prefs().getInt(PREF_OVERLAY_X, Int.MIN_VALUE)
             val savedY = prefs().getInt(PREF_OVERLAY_Y, Int.MIN_VALUE)
             if (savedX != Int.MIN_VALUE && savedY != Int.MIN_VALUE) {
-                val (clampedX, clampedY) = clampRestoredPosition(savedX, savedY, screenW, screenH, ringSize, margin)
+                val (clampedX, clampedY) = clampRestoredPosition(savedX, savedY, screenW, screenH, ringSize, margin, screenLeft)
                 x = clampedX
                 y = clampedY
             } else {
@@ -1362,7 +1367,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // A drag finished (or was cancelled by the system): settle the ring on the nearest edge.
         fun settleRingAfterDrag(v: View) {
             params.x = if (params.x + ringSize / 2 > screenW / 2)
-                screenW - ringSize - margin else margin
+                screenW - ringSize - margin else screenLeft + margin
             // Clamp y into the on-screen band too (M1): FLAG_LAYOUT_NO_LIMITS disables
             // WindowManager's own clamping (needed for peek), so a drag that ends near
             // the top/bottom edge could otherwise park the ring wholly off-screen with
@@ -1655,7 +1660,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 if (newScreenW == lastScreenW) false else {
                     val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
                     val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                        prePeekX ?: params.x, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
+                        prePeekX ?: params.x, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx(), screenLeft, displayLeft
                     )
                     params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
                     if (canPeekAt(newDockedX, ringSize)) {
@@ -1672,7 +1677,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             } else {
                 // #352: pull a docked ring back on-screen if the new screen no longer contains it
                 // (e.g. kept out beside a landscape nav bar, then rotated to portrait).
-                val (x, y) = clampRestoredPosition(params.x, params.y, newScreenW, newScreenH, ringSize, margin)
+                val (x, y) = clampRestoredPosition(params.x, params.y, newScreenW, newScreenH, ringSize, margin, screenLeft)
                 val offScreen = x != params.x || y != params.y
                 if (offScreen) {
                     Log.i(TAG, "Rotation: docked ring off the new screen, moved (${params.x},${params.y}) -> ($x,$y)")
@@ -1704,7 +1709,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val oldDockedX = prePeekX ?: params.x
             val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
             val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
+                oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx(), screenLeft, displayLeft
             )
             if (canPeekAt(newDockedX, ringSize)) {
                 prePeekX = newDockedX
@@ -1713,7 +1718,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 unpeekInPlace(params, newDockedX)
             }
         } else {
-            params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin)
+            params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin, screenLeft)
         }
         params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
         lastScreenW = newScreenW
@@ -1891,7 +1896,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx())
+        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx(), displayLeft)
 
         prePeekX = params.x
         isPeeked = true
@@ -1927,7 +1932,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val targetX = prePeekX ?: run {
             val ringSize = params.width
             val margin = (MARGIN_DP * dp).toInt()
-            val recovered = if (params.x + ringSize / 2 > screenW / 2) screenW - ringSize - margin else margin
+            val recovered = if (params.x + ringSize / 2 > screenW / 2) screenW - ringSize - margin else screenLeft + margin
             Log.w(TAG, "restoreFromPeek: prePeekX was null while peeked (state desync) -- recovering to x=$recovered")
             recovered
         }
@@ -2282,7 +2287,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val ringMargin = (RING_AVOID_MARGIN_DP * dp).toInt()
         val offset = (FEEDBACK_OFFSET_DP * dp).toInt()
         val ringSize = bubbleParams.width
-        feedbackParams.x = maxOf(margin, bubbleParams.x - offset)
+        feedbackParams.x = maxOf(screenLeft + margin, bubbleParams.x - offset)
         var openUpward = bubbleParams.y + ringSize / 2 > screenH / 2
         feedbackParams.y = if (openUpward) {
             // Icon in bottom half: open upward, same placement as before this fix.

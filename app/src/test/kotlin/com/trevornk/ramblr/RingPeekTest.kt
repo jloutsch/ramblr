@@ -41,6 +41,12 @@ class RingPeekTest {
         assertTrue(RingPeek.canPeek(x = 900, screenW, ringSize, navLeftPx = 0, navRightPx = 0))
     }
 
+    @Test fun `a left peek goes past a left display cutout to the real edge`() {
+        // S23+ with the camera on the left: x=0 starts after the 94 px cutout, so the display's
+        // real left edge is at -94 and the 52 px sliver plus 15 px inset ends at x=-27 (#352).
+        assertEquals(-94 + 52 - 147 + 15, RingPeek.peekedX(x = 21, screenW = 2120, ringSize = 147, peekVisiblePx = 52, ringInsetPx = 15, leftEdge = -94))
+    }
+
     @Test fun `auto-peek allowed only while idle`() {
         assertTrue(RingPeek.shouldAutoPeek(RecordingStateMachine.State.IDLE))
         assertFalse(RingPeek.shouldAutoPeek(RecordingStateMachine.State.RECORDING))
