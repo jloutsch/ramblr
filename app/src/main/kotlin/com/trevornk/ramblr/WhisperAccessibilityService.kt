@@ -13,12 +13,14 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -823,6 +825,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     /** Registered in [registerNetworkCallback]; null when registration failed or after teardown. */
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    /** Registered in [registerDisplayListener]; null when registration failed or after teardown. */
+    private var displayListener: DisplayManager.DisplayListener? = null
     /** Registered in [registerScreenStateReceiver]; null when registration failed or after
      *  teardown. Reapplies overlay visibility on SCREEN_ON/SCREEN_OFF/USER_PRESENT so the ring
      *  hides the instant the device locks and reappears right after unlock (see
@@ -962,6 +966,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         IconVisibilityNotifications.repostIfMissing(this, overlayConnected = overlayView != null)
         registerAccessibilityButton()
         registerNetworkCallback()
+        registerDisplayListener()
         registerScreenStateReceiver()
         thread { ProcessRecordingOrphanCleaner.cleanupOnce(cacheDir) }
         thread { ModelDownloader.pruneOrphanedModelDirs(this) }
@@ -1036,6 +1041,38 @@ open class WhisperAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to unregister network callback", e)
         }
+    }
+
+    /** A 180° flip keeps the display size, so [onConfigurationChanged] never fires for it (#352). */
+    private fun registerDisplayListener() {
+        val dm = getSystemService(DisplayManager::class.java) ?: return
+        var lastRotation = dm.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: return
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY) return
+                val rotation = dm.getDisplay(displayId)?.rotation ?: return
+                val flipped = isFlipWithoutResize(lastRotation, rotation)
+                lastRotation = rotation
+                if (flipped) {
+                    Log.i(TAG, "Display flipped 180° to rotation $rotation; repositioning ring")
+                    handleScreenSizeChange()
+                }
+            }
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+        }
+        try {
+            dm.registerDisplayListener(listener, handler)
+            displayListener = listener
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not register display listener; a 180° flip won't reposition the ring", e)
+        }
+    }
+
+    private fun unregisterDisplayListener() {
+        val listener = displayListener ?: return
+        displayListener = null
+        getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(listener)
     }
 
     /**
@@ -1150,6 +1187,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         ringModePrefsListener = null
         clearDictationTarget()
         unregisterNetworkCallback()
+        unregisterDisplayListener()
         unregisterScreenStateReceiver()
         // Only tear down a runtime that was actually constructed. `runtime`'s getter is lazy
         // (see its kdoc above) -- if the service is destroyed before onServiceConnected ever ran
