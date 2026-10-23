@@ -61,6 +61,9 @@ class OverlayAttachGuardTest {
                         attached += view
                     }
 
+                    // A Java default method, so `by real` doesn't forward it.
+                    override fun getCurrentWindowMetrics() = real.currentWindowMetrics
+
                     override fun removeView(view: View) {
                         removeCalls++
                         if (throwOnRemove) {

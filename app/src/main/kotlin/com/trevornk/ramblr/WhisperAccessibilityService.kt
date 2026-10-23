@@ -24,6 +24,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
 import android.view.ViewOutlineProvider
+import android.view.WindowInsets
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -815,6 +816,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
     // in showOverlay() and kept in sync every time it repositions the ring.
     private var lastScreenW = 0
     private var lastScreenH = 0
+    // Full display size, for telling a rotation from a fold: screenW/H lose the insets, so they
+    // don't swap exactly on rotation when the nav bar stays at the bottom (gesture navigation).
+    private var lastDisplayW = 0
+    private var lastDisplayH = 0
 
     /** Registered in [registerNetworkCallback]; null when registration failed or after teardown. */
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
@@ -917,8 +922,13 @@ open class WhisperAccessibilityService : AccessibilityService() {
     private val historyStore by lazy { DictationHistoryStore.forContext(this) }
 
     private val dp get() = resources.displayMetrics.density
-    private val screenW get() = resources.displayMetrics.widthPixels
-    private val screenH get() = resources.displayMetrics.heightPixels
+    // #352: overlay x/y start after the display cutout and the frame runs under the nav bar, so
+    // both come out of the size; the full display size put a peeked ring past the landscape edge.
+    private fun windowInsets(types: Int) = (getSystemService(WINDOW_SERVICE) as WindowManager)
+        .currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(types)
+    private val overlayInsets get() = windowInsets(WindowInsets.Type.navigationBars() or WindowInsets.Type.displayCutout())
+    private val screenW get() = resources.displayMetrics.widthPixels - overlayInsets.let { it.left + it.right }
+    private val screenH get() = resources.displayMetrics.heightPixels - overlayInsets.let { it.top + it.bottom }
 
     override fun onServiceConnected() {
         DictationTextWriter.diagnostic = { Log.w(TAG, it) }
@@ -1302,6 +1312,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
         }
         lastScreenW = screenW
         lastScreenH = screenH
+        lastDisplayW = resources.displayMetrics.widthPixels
+        lastDisplayH = resources.displayMetrics.heightPixels
 
         // Where the ring window sat, and where the finger was, at ACTION_DOWN. The ring is only
         // moved once the gesture has been classified as a drag (see RingGestureTracker), so a held
@@ -1624,23 +1636,51 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val params = layoutParams ?: return
         val newScreenW = screenW
         val newScreenH = screenH
-        if (!isFoldSizeChange(lastScreenW, lastScreenH, newScreenW, newScreenH)) {
+        val isFold = isFoldSizeChange(
+            lastDisplayW, lastDisplayH, resources.displayMetrics.widthPixels, resources.displayMetrics.heightPixels
+        )
+        lastDisplayW = resources.displayMetrics.widthPixels
+        lastDisplayH = resources.displayMetrics.heightPixels
+        if (!isFold) {
             // A plain rotation still never repositions a DOCKED ring (unchanged, #41) -- but a
             // PEEKED ring's window x is defined relative to a screen edge that just moved (#128).
             // Leaving it alone strands the sliver mid-screen (portrait -> landscape) or entirely
             // past the new, narrower edge (landscape -> portrait) while isPeeked stays true, so
             // the next tap lands on nothing and silently does nothing.
-            if (isPeeked && (newScreenW != lastScreenW)) {
-                val ringSize = params.width
-                val margin = (MARGIN_DP * dp).toInt()
-                val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-                val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                    prePeekX ?: params.x, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
-                )
-                prePeekX = newDockedX
-                params.x = newPeekedX
-                params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
-                Log.i(TAG, "Rotation while peeked: re-derived x=$newPeekedX (docked $newDockedX) for ${newScreenW}px screen")
+            val ringSize = params.width
+            val margin = (MARGIN_DP * dp).toInt()
+            val moved = if (isPeeked) {
+                if (newScreenW == lastScreenW) false else {
+                    val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
+                    val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
+                        prePeekX ?: params.x, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
+                    )
+                    params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
+                    if (canPeekAt(newDockedX, ringSize)) {
+                        prePeekX = newDockedX
+                        params.x = newPeekedX
+                        Log.i(TAG, "Rotation while peeked: re-derived x=$newPeekedX (docked $newDockedX) for ${newScreenW}px screen")
+                    } else {
+                        // #352: the navigation bar is on this edge now; stay out beside it.
+                        unpeekInPlace(params, newDockedX)
+                        Log.i(TAG, "Rotation while peeked: navigation bar on this edge, docked at x=$newDockedX")
+                    }
+                    true
+                }
+            } else {
+                // #352: pull a docked ring back on-screen if the new screen no longer contains it
+                // (e.g. kept out beside a landscape nav bar, then rotated to portrait).
+                val (x, y) = clampRestoredPosition(params.x, params.y, newScreenW, newScreenH, ringSize, margin)
+                val offScreen = x != params.x || y != params.y
+                if (offScreen) {
+                    Log.i(TAG, "Rotation: docked ring off the new screen, moved (${params.x},${params.y}) -> ($x,$y)")
+                    params.x = x
+                    params.y = y
+                    persistOverlayPosition(x, y)
+                }
+                offScreen
+            }
+            if (moved) {
                 val wm = getSystemService(WINDOW_SERVICE) as WindowManager
                 handler.post {
                     overlayView?.let { wm.updateViewLayout(it, params) }
@@ -1664,8 +1704,12 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
                 oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
             )
-            prePeekX = newDockedX
-            params.x = newPeekedX
+            if (canPeekAt(newDockedX, ringSize)) {
+                prePeekX = newDockedX
+                params.x = newPeekedX
+            } else {
+                unpeekInPlace(params, newDockedX)
+            }
         } else {
             params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin)
         }
@@ -1840,8 +1884,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
         if (overlay.alpha == 0f) { armIdlePeekTimer(); return }
         val params = layoutParams ?: return
 
-        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val ringSize = params.width
+        if (!canPeekAt(params.x, ringSize)) { armIdlePeekTimer(); return }
+
+        val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
         val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx())
 
@@ -1850,6 +1896,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
         refreshTranslationBadge()
         Log.i(TAG, "Peeking ring: x=${params.x} -> $targetX (sliver ${peekVisiblePx}px, inset ${ringInsetPx()}px)")
         animateRingX(params, wm, targetX)
+    }
+
+    private fun canPeekAt(x: Int, ringSize: Int): Boolean {
+        val nav = windowInsets(WindowInsets.Type.navigationBars())
+        return RingPeek.canPeek(x, screenW, ringSize, nav.left, nav.right)
     }
 
     /** The transparent gap between the ring WINDOW's edge and the mic button actually drawn inside
@@ -1884,6 +1935,16 @@ open class WhisperAccessibilityService : AccessibilityService() {
         Log.i(TAG, "Restoring ring from peek: x=${params.x} -> $targetX")
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         animateRingX(params, wm, targetX)
+        armIdlePeekTimer()
+    }
+
+    /** Leaves peek without animating, for a screen change that moved the navigation bar onto the
+     *  ring's edge (#352); the caller applies [params]. */
+    private fun unpeekInPlace(params: WindowManager.LayoutParams, dockedX: Int) {
+        params.x = dockedX
+        isPeeked = false
+        prePeekX = null
+        refreshTranslationBadge()
         armIdlePeekTimer()
     }
 

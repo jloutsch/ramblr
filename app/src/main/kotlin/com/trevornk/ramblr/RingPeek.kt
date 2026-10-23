@@ -45,6 +45,11 @@ object RingPeek {
         if (isSnappedToRightEdge(x, screenW, ringSize)) screenW - peekVisiblePx - ringInsetPx
         else peekVisiblePx - ringSize + ringInsetPx
 
+    /** No peek against a side navigation bar (#352): the ring draws above it, so the hidden part
+     *  would cover the buttons. */
+    fun canPeek(x: Int, screenW: Int, ringSize: Int, navLeftPx: Int, navRightPx: Int): Boolean =
+        if (isSnappedToRightEdge(x, screenW, ringSize)) navRightPx == 0 else navLeftPx == 0
+
     /** Peeking is only appropriate while the ring is truly idle -- never mid-recording or while
      *  cleanup/transcription is still running, so nothing important disappears mid-flow. */
     fun shouldAutoPeek(state: RecordingStateMachine.State): Boolean = state == RecordingStateMachine.State.IDLE

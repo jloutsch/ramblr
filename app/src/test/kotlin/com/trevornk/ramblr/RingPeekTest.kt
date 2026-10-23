@@ -30,6 +30,17 @@ class RingPeekTest {
         assertEquals(peekVisiblePx - ringSize, x)
     }
 
+    @Test fun `no peek against the edge the navigation bar is on`() {
+        assertFalse(RingPeek.canPeek(x = 900, screenW, ringSize, navLeftPx = 0, navRightPx = 126))
+        assertFalse(RingPeek.canPeek(x = 0, screenW, ringSize, navLeftPx = 126, navRightPx = 0))
+    }
+
+    @Test fun `peek against the edge opposite the navigation bar, or with no side bar`() {
+        assertTrue(RingPeek.canPeek(x = 0, screenW, ringSize, navLeftPx = 0, navRightPx = 126))
+        assertTrue(RingPeek.canPeek(x = 900, screenW, ringSize, navLeftPx = 126, navRightPx = 0))
+        assertTrue(RingPeek.canPeek(x = 900, screenW, ringSize, navLeftPx = 0, navRightPx = 0))
+    }
+
     @Test fun `auto-peek allowed only while idle`() {
         assertTrue(RingPeek.shouldAutoPeek(RecordingStateMachine.State.IDLE))
         assertFalse(RingPeek.shouldAutoPeek(RecordingStateMachine.State.RECORDING))
