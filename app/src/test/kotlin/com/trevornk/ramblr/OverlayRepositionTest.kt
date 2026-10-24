@@ -7,6 +7,20 @@ import org.junit.Test
 
 class OverlayRepositionTest {
 
+    // --- isFlipWithoutResize (#352) ---
+
+    @Test fun `a 180 degree turn is a flip`() {
+        assertTrue(isFlipWithoutResize(oldRotation = 3, newRotation = 1))
+        assertTrue(isFlipWithoutResize(oldRotation = 1, newRotation = 3))
+        assertTrue(isFlipWithoutResize(oldRotation = 0, newRotation = 2))
+    }
+
+    @Test fun `a 90 degree turn or no turn is not a flip`() {
+        assertFalse(isFlipWithoutResize(oldRotation = 0, newRotation = 1))
+        assertFalse(isFlipWithoutResize(oldRotation = 3, newRotation = 0))
+        assertFalse(isFlipWithoutResize(oldRotation = 1, newRotation = 1))
+    }
+
     // --- snappedXForScreenChange ---
 
     @Test fun `ring near the right edge stays pinned to the right edge on the new screen`() {
@@ -252,6 +266,29 @@ class OverlayRepositionTest {
 
     @Test fun `menu width falls back to the screen less margins on a narrow screen`() {
         assertEquals(700 - 36, styleMenuMaxWidth(screenW = 700, margin = 18, preferredMaxPx = 810))
+    }
+
+    // --- usable left edge past a left navigation bar (#352) ---
+
+    @Test fun `a ring snapped left lands beside a left navigation bar, not under it`() {
+        // S23+ with the camera on the right: the 126 px nav bar sits at x 0..126.
+        assertEquals(126 + 21, snappedXForScreenChange(oldX = 21, oldScreenW = 1080, newScreenW = 2340, ringSize = 147, margin = 21, newLeft = 126))
+    }
+
+    @Test fun `a docked ring under a left navigation bar is pulled out beside it`() {
+        val (x, y) = clampRestoredPosition(x = 21, y = 184, screenW = 2340, screenH = 1080, ringSize = 147, margin = 21, left = 126)
+        assertEquals(126 + 21, x)
+        assertEquals(184, y)
+    }
+
+    @Test fun `a peeked ring re-derived onto a cutout-left screen peeks to the real edge`() {
+        // Portrait right-edge peek rotated to camera-on-the-left: the left edge is at -94.
+        val (peekedX, dockedX) = peekedPositionForScreenChange(
+            oldDockedX = 21, oldScreenW = 1080, newScreenW = 2120, ringSize = 147, margin = 21,
+            peekVisiblePx = 52, ringInsetPx = 15, newLeft = 0, newLeftEdge = -94,
+        )
+        assertEquals(21, dockedX)
+        assertEquals(-94 + 52 - 147 + 15, peekedX)
     }
 
     @Test fun `a width-capped menu that fits above right-aligns to a right-edge ring`() {

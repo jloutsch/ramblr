@@ -3,15 +3,27 @@ package com.trevornk.ramblr
 import kotlin.math.roundToInt
 
 /**
+ * True when the display turned 180° (e.g. landscape to the other landscape) without changing size.
+ * No configuration change reaches the service then, yet the overlay's x origin moves to the other
+ * side's cutout, so the ring needs repositioning like a rotation (#352). Rotations are
+ * [android.view.Surface] ROTATION_* values (0..3).
+ */
+fun isFlipWithoutResize(oldRotation: Int, newRotation: Int): Boolean =
+    oldRotation != newRotation && (oldRotation - newRotation) % 2 == 0
+
+/**
  * Recomputes the ring's x after a fold/unfold screen-size change (#41), pinning it to the same
  * edge (left or right) it was closest to on the OLD screen -- the same rule the drag-release
  * handler already applies -- rather than re-testing the stale absolute x against the NEW screen's
  * midpoint, which would misclassify a ring pinned to the right edge of a small screen as
  * left-of-center once the screen is much wider.
+ *
+ * [newLeft] is the new screen's usable left edge: past a left navigation bar, which the overlay's
+ * x origin doesn't skip (#352).
  */
-fun snappedXForScreenChange(oldX: Int, oldScreenW: Int, newScreenW: Int, ringSize: Int, margin: Int): Int {
+fun snappedXForScreenChange(oldX: Int, oldScreenW: Int, newScreenW: Int, ringSize: Int, margin: Int, newLeft: Int = 0): Int {
     val wasNearRightEdge = oldX + ringSize / 2 > oldScreenW / 2
-    return if (wasNearRightEdge) newScreenW - ringSize - margin else margin
+    return if (wasNearRightEdge) newScreenW - ringSize - margin else newLeft + margin
 }
 
 /**
@@ -35,9 +47,11 @@ fun peekedPositionForScreenChange(
     margin: Int,
     peekVisiblePx: Int,
     ringInsetPx: Int = 0,
+    newLeft: Int = 0,
+    newLeftEdge: Int = 0,
 ): Pair<Int, Int> {
-    val newDockedX = snappedXForScreenChange(oldDockedX, oldScreenW, newScreenW, ringSize, margin)
-    val newPeekedX = RingPeek.peekedX(newDockedX, newScreenW, ringSize, peekVisiblePx, ringInsetPx)
+    val newDockedX = snappedXForScreenChange(oldDockedX, oldScreenW, newScreenW, ringSize, margin, newLeft)
+    val newPeekedX = RingPeek.peekedX(newDockedX, newScreenW, ringSize, peekVisiblePx, ringInsetPx, newLeftEdge)
     return newPeekedX to newDockedX
 }
 
@@ -66,11 +80,13 @@ fun proportionalYForScreenChange(oldY: Int, oldScreenH: Int, newScreenH: Int, ri
  * could park the ring partially or fully off-screen with no on-screen affordance to recover it.
  * Mirrors the same [Int.coerceIn] pattern already used by the drag-release y clamp (see the
  * ACTION_UP handler in WhisperAccessibilityService) rather than introducing new clamping rules.
+ * [left] is the usable left edge, as in [snappedXForScreenChange].
  */
-fun clampRestoredPosition(x: Int, y: Int, screenW: Int, screenH: Int, ringSize: Int, margin: Int): Pair<Int, Int> {
-    val maxX = (screenW - ringSize - margin).coerceAtLeast(margin)
+fun clampRestoredPosition(x: Int, y: Int, screenW: Int, screenH: Int, ringSize: Int, margin: Int, left: Int = 0): Pair<Int, Int> {
+    val minX = left + margin
+    val maxX = (screenW - ringSize - margin).coerceAtLeast(minX)
     val maxY = (screenH - ringSize - margin).coerceAtLeast(margin)
-    return x.coerceIn(margin, maxX) to y.coerceIn(margin, maxY)
+    return x.coerceIn(minX, maxX) to y.coerceIn(margin, maxY)
 }
 
 /**

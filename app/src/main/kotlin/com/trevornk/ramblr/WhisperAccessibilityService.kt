@@ -13,12 +13,14 @@ import android.graphics.PixelFormat
 import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.hardware.display.DisplayManager
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
+import android.view.Display
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
@@ -819,6 +821,8 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
     /** Registered in [registerNetworkCallback]; null when registration failed or after teardown. */
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    /** Registered in [registerDisplayListener]; null when registration failed or after teardown. */
+    private var displayListener: DisplayManager.DisplayListener? = null
     /** Registered in [registerScreenStateReceiver]; null when registration failed or after
      *  teardown. Reapplies overlay visibility on SCREEN_ON/SCREEN_OFF/USER_PRESENT so the ring
      *  hides the instant the device locks and reappears right after unlock (see
@@ -927,6 +931,11 @@ open class WhisperAccessibilityService : AccessibilityService() {
         windowInsets(WindowInsets.Type.displayCutout()).left - windowInsets(WindowInsets.Type.navigationBars()).right
     private val screenH get() = resources.displayMetrics.heightPixels -
         windowInsets(WindowInsets.Type.displayCutout()).top - windowInsets(WindowInsets.Type.navigationBars()).bottom
+    // The usable left edge: past a left nav bar, since x=0 lies under it.
+    private val screenLeft get() = (windowInsets(WindowInsets.Type.navigationBars()).left -
+        windowInsets(WindowInsets.Type.displayCutout()).left).coerceAtLeast(0)
+    // The display's real left edge, where a left peek goes: x=0 starts after a left cutout.
+    private val displayLeft get() = -windowInsets(WindowInsets.Type.displayCutout()).left
 
     override fun onServiceConnected() {
         DictationTextWriter.diagnostic = { Log.w(TAG, it) }
@@ -958,6 +967,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         IconVisibilityNotifications.repostIfMissing(this, overlayConnected = overlayView != null)
         registerAccessibilityButton()
         registerNetworkCallback()
+        registerDisplayListener()
         registerScreenStateReceiver()
         thread { ProcessRecordingOrphanCleaner.cleanupOnce(cacheDir) }
         thread { ModelDownloader.pruneOrphanedModelDirs(this) }
@@ -1032,6 +1042,38 @@ open class WhisperAccessibilityService : AccessibilityService() {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to unregister network callback", e)
         }
+    }
+
+    /** A 180° flip keeps the display size, so [onConfigurationChanged] never fires for it (#352). */
+    private fun registerDisplayListener() {
+        val dm = getSystemService(DisplayManager::class.java) ?: return
+        var lastRotation = dm.getDisplay(Display.DEFAULT_DISPLAY)?.rotation ?: return
+        val listener = object : DisplayManager.DisplayListener {
+            override fun onDisplayChanged(displayId: Int) {
+                if (displayId != Display.DEFAULT_DISPLAY) return
+                val rotation = dm.getDisplay(displayId)?.rotation ?: return
+                val flipped = isFlipWithoutResize(lastRotation, rotation)
+                lastRotation = rotation
+                if (flipped) {
+                    Log.i(TAG, "Display flipped 180° to rotation $rotation; repositioning ring")
+                    handleScreenSizeChange()
+                }
+            }
+            override fun onDisplayAdded(displayId: Int) {}
+            override fun onDisplayRemoved(displayId: Int) {}
+        }
+        try {
+            dm.registerDisplayListener(listener, handler)
+            displayListener = listener
+        } catch (e: Exception) {
+            Log.e(TAG, "Could not register display listener; a 180° flip won't reposition the ring", e)
+        }
+    }
+
+    private fun unregisterDisplayListener() {
+        val listener = displayListener ?: return
+        displayListener = null
+        getSystemService(DisplayManager::class.java)?.unregisterDisplayListener(listener)
     }
 
     /**
@@ -1146,6 +1188,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         ringModePrefsListener = null
         clearDictationTarget()
         unregisterNetworkCallback()
+        unregisterDisplayListener()
         unregisterScreenStateReceiver()
         // Only tear down a runtime that was actually constructed. `runtime`'s getter is lazy
         // (see its kdoc above) -- if the service is destroyed before onServiceConnected ever ran
@@ -1300,7 +1343,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val savedX = prefs().getInt(PREF_OVERLAY_X, Int.MIN_VALUE)
             val savedY = prefs().getInt(PREF_OVERLAY_Y, Int.MIN_VALUE)
             if (savedX != Int.MIN_VALUE && savedY != Int.MIN_VALUE) {
-                val (clampedX, clampedY) = clampRestoredPosition(savedX, savedY, screenW, screenH, ringSize, margin)
+                val (clampedX, clampedY) = clampRestoredPosition(savedX, savedY, screenW, screenH, ringSize, margin, screenLeft)
                 x = clampedX
                 y = clampedY
             } else {
@@ -1356,7 +1399,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         // A drag finished (or was cancelled by the system): settle the ring on the nearest edge.
         fun settleRingAfterDrag(v: View) {
             params.x = if (params.x + ringSize / 2 > screenW / 2)
-                screenW - ringSize - margin else margin
+                screenW - ringSize - margin else screenLeft + margin
             // Clamp y into the on-screen band too (M1): FLAG_LAYOUT_NO_LIMITS disables
             // WindowManager's own clamping (needed for peek), so a drag that ends near
             // the top/bottom edge could otherwise park the ring wholly off-screen with
@@ -1641,7 +1684,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
             val oldDockedX = prePeekX ?: params.x
             val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
             val (newPeekedX, newDockedX) = peekedPositionForScreenChange(
-                oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx()
+                oldDockedX, lastScreenW, newScreenW, ringSize, margin, peekVisiblePx, ringInsetPx(), screenLeft, displayLeft
             )
             if (canPeekAt(newDockedX, ringSize)) {
                 prePeekX = newDockedX
@@ -1653,7 +1696,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
                 Log.i(TAG, "Screen change while peeked: navigation bar on this edge, docked at x=$newDockedX")
             }
         } else {
-            params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin)
+            params.x = snappedXForScreenChange(params.x, lastScreenW, newScreenW, ringSize, margin, screenLeft)
         }
         params.y = proportionalYForScreenChange(params.y, lastScreenH, newScreenH, ringSize, margin)
         Log.i(TAG, "Screen change: ring at (${params.x},${params.y}) for ${newScreenW}x${newScreenH} screen")
@@ -1832,7 +1875,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
 
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx())
+        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx(), displayLeft)
 
         prePeekX = params.x
         isPeeked = true
@@ -1868,7 +1911,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val targetX = prePeekX ?: run {
             val ringSize = params.width
             val margin = (MARGIN_DP * dp).toInt()
-            val recovered = if (params.x + ringSize / 2 > screenW / 2) screenW - ringSize - margin else margin
+            val recovered = if (params.x + ringSize / 2 > screenW / 2) screenW - ringSize - margin else screenLeft + margin
             Log.w(TAG, "restoreFromPeek: prePeekX was null while peeked (state desync) -- recovering to x=$recovered")
             recovered
         }
@@ -2223,7 +2266,7 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val ringMargin = (RING_AVOID_MARGIN_DP * dp).toInt()
         val offset = (FEEDBACK_OFFSET_DP * dp).toInt()
         val ringSize = bubbleParams.width
-        feedbackParams.x = maxOf(margin, bubbleParams.x - offset)
+        feedbackParams.x = maxOf(screenLeft + margin, bubbleParams.x - offset)
         var openUpward = bubbleParams.y + ringSize / 2 > screenH / 2
         feedbackParams.y = if (openUpward) {
             // Icon in bottom half: open upward, same placement as before this fix.

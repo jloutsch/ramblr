@@ -40,10 +40,13 @@ object RingPeek {
      *  which is exactly the too-small target [PeekVisibleSize]'s kdoc blames for the original
      *  peek-restore reliability bug. Offsetting by the inset makes [peekVisiblePx] mean what it
      *  says -- that much DRAWN ring on-screen -- without changing the ring's drawn size.
-     *  Defaults to 0 so existing callers/tests keep the old window-measured behavior. */
-    fun peekedX(x: Int, screenW: Int, ringSize: Int, peekVisiblePx: Int, ringInsetPx: Int = 0): Int =
+     *  Defaults to 0 so existing callers/tests keep the old window-measured behavior.
+     *
+     *  [leftEdge] is the display's real left edge in window x: negative by the width of a left
+     *  display cutout, which the overlay's x origin starts after (#352). */
+    fun peekedX(x: Int, screenW: Int, ringSize: Int, peekVisiblePx: Int, ringInsetPx: Int = 0, leftEdge: Int = 0): Int =
         if (isSnappedToRightEdge(x, screenW, ringSize)) screenW - peekVisiblePx - ringInsetPx
-        else peekVisiblePx - ringSize + ringInsetPx
+        else leftEdge + peekVisiblePx - ringSize + ringInsetPx
 
     /** No peek against a side navigation bar (#352): the ring draws above it, so the hidden part
      *  would cover the buttons. */
