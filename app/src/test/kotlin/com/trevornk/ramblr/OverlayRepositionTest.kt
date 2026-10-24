@@ -22,6 +22,20 @@ class OverlayRepositionTest {
         assertTrue(isFoldSizeChange(oldW = 1080, oldH = 2364, newW = 2076, newH = 2152))
     }
 
+    // --- isFlipWithoutResize (#352) ---
+
+    @Test fun `a 180 degree turn is a flip`() {
+        assertTrue(isFlipWithoutResize(oldRotation = 3, newRotation = 1))
+        assertTrue(isFlipWithoutResize(oldRotation = 1, newRotation = 3))
+        assertTrue(isFlipWithoutResize(oldRotation = 0, newRotation = 2))
+    }
+
+    @Test fun `a 90 degree turn or no turn is not a flip`() {
+        assertFalse(isFlipWithoutResize(oldRotation = 0, newRotation = 1))
+        assertFalse(isFlipWithoutResize(oldRotation = 3, newRotation = 0))
+        assertFalse(isFlipWithoutResize(oldRotation = 1, newRotation = 1))
+    }
+
     // --- snappedXForScreenChange ---
 
     @Test fun `ring near the right edge stays pinned to the right edge on the new screen`() {

@@ -13,6 +13,15 @@ fun isFoldSizeChange(oldW: Int, oldH: Int, newW: Int, newH: Int): Boolean {
 }
 
 /**
+ * True when the display turned 180° (e.g. landscape to the other landscape) without changing size.
+ * No configuration change reaches the service then, yet the overlay's x origin moves to the other
+ * side's cutout, so the ring needs repositioning like a rotation (#352). Rotations are
+ * [android.view.Surface] ROTATION_* values (0..3).
+ */
+fun isFlipWithoutResize(oldRotation: Int, newRotation: Int): Boolean =
+    oldRotation != newRotation && (oldRotation - newRotation) % 2 == 0
+
+/**
  * Recomputes the ring's x after a fold/unfold screen-size change (#41), pinning it to the same
  * edge (left or right) it was closest to on the OLD screen -- the same rule the drag-release
  * handler already applies -- rather than re-testing the stale absolute x against the NEW screen's
