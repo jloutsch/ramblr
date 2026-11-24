@@ -43,13 +43,18 @@ object RingPeek {
      *  Defaults to 0 so existing callers/tests keep the old window-measured behavior.
      *
      *  [leftEdge] is the display's real left edge in window x: negative by the width of a left
-     *  display cutout, which the overlay's x origin starts after (#352). */
-    fun peekedX(x: Int, screenW: Int, ringSize: Int, peekVisiblePx: Int, ringInsetPx: Int = 0, leftEdge: Int = 0): Int =
-        if (isSnappedToRightEdge(x, screenW, ringSize)) screenW - peekVisiblePx - ringInsetPx
+     *  display cutout, which the overlay's x origin starts after (#352). [rightEdge] is the real
+     *  right edge: past [screenW] when a right navigation bar is hidden by a fullscreen app. */
+    fun peekedX(
+        x: Int, screenW: Int, ringSize: Int, peekVisiblePx: Int, ringInsetPx: Int = 0, leftEdge: Int = 0,
+        rightEdge: Int = screenW,
+    ): Int =
+        if (isSnappedToRightEdge(x, screenW, ringSize)) rightEdge - peekVisiblePx - ringInsetPx
         else leftEdge + peekVisiblePx - ringSize + ringInsetPx
 
     /** No peek against a side navigation bar (#352): the ring draws above it, so the hidden part
-     *  would cover the buttons. */
+     *  would cover the buttons. Callers pass the bar's VISIBLE size: a bar hidden by a fullscreen
+     *  app is 0, so the ring still tucks over a video. */
     fun canPeek(x: Int, screenW: Int, ringSize: Int, navLeftPx: Int, navRightPx: Int): Boolean =
         if (isSnappedToRightEdge(x, screenW, ringSize)) navRightPx == 0 else navLeftPx == 0
 

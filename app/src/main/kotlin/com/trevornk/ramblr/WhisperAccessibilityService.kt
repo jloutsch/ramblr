@@ -927,6 +927,10 @@ open class WhisperAccessibilityService : AccessibilityService() {
     // would otherwise draw over. The full display size put a peeked ring past the landscape edge.
     private fun windowInsets(types: Int) = (getSystemService(WINDOW_SERVICE) as WindowManager)
         .currentWindowMetrics.windowInsets.getInsetsIgnoringVisibility(types)
+    // The bars actually on screen right now: a fullscreen video hides a side nav bar, which
+    // [windowInsets] still reports, so tucking decisions use this instead.
+    private fun visibleWindowInsets(types: Int) = (getSystemService(WINDOW_SERVICE) as WindowManager)
+        .currentWindowMetrics.windowInsets.getInsets(types)
     private val screenW get() = resources.displayMetrics.widthPixels -
         windowInsets(WindowInsets.Type.displayCutout()).left - windowInsets(WindowInsets.Type.navigationBars()).right
     private val screenH get() = resources.displayMetrics.heightPixels -
@@ -936,6 +940,9 @@ open class WhisperAccessibilityService : AccessibilityService() {
         windowInsets(WindowInsets.Type.displayCutout()).left).coerceAtLeast(0)
     // The display's real left edge, where a left peek goes: x=0 starts after a left cutout.
     private val displayLeft get() = -windowInsets(WindowInsets.Type.displayCutout()).left
+    // Where a right peek goes: [screenW] stops at a right nav bar, which a fullscreen app hides.
+    private val displayRight get() = screenW + windowInsets(WindowInsets.Type.navigationBars()).right -
+        visibleWindowInsets(WindowInsets.Type.navigationBars()).right
 
     override fun onServiceConnected() {
         DictationTextWriter.diagnostic = { Log.w(TAG, it) }
@@ -1871,23 +1878,37 @@ open class WhisperAccessibilityService : AccessibilityService() {
         val params = layoutParams ?: return
 
         val ringSize = params.width
-        if (!canPeekAt(params.x, ringSize)) { armIdlePeekTimer(); return }
+        if (!canPeekAt(params.x, ringSize)) {
+            if (!peekBlockedByNavBar) {
+                peekBlockedByNavBar = true
+                Log.i(TAG, "Not peeking: navigation bar showing on the ring's edge " +
+                    "(${visibleWindowInsets(WindowInsets.Type.navigationBars())})")
+            }
+            armIdlePeekTimer()
+            return
+        }
 
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val peekVisiblePx = (PeekVisibleSize.dpOrDefault(this) * dp).toInt()
-        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx(), displayLeft)
+        val targetX = RingPeek.peekedX(params.x, screenW, ringSize, peekVisiblePx, ringInsetPx(), displayLeft, displayRight)
 
         prePeekX = params.x
         isPeeked = true
         refreshTranslationBadge()
-        Log.i(TAG, "Peeking ring: x=${params.x} -> $targetX (sliver ${peekVisiblePx}px, inset ${ringInsetPx()}px)")
+        peekBlockedByNavBar = false
+        Log.i(TAG, "Peeking ring: x=${params.x} -> $targetX (sliver ${peekVisiblePx}px, inset ${ringInsetPx()}px, " +
+            "nav visible ${visibleWindowInsets(WindowInsets.Type.navigationBars())})")
         animateRingX(params, wm, targetX)
     }
 
     private fun canPeekAt(x: Int, ringSize: Int): Boolean {
-        val nav = windowInsets(WindowInsets.Type.navigationBars())
+        val nav = visibleWindowInsets(WindowInsets.Type.navigationBars())
         return RingPeek.canPeek(x, screenW, ringSize, nav.left, nav.right)
     }
+
+    /** True from a nav-bar-blocked peek attempt until the next peek, so the idle timer's retries
+     *  log the block once instead of every few seconds. */
+    private var peekBlockedByNavBar = false
 
     /** The transparent gap between the ring WINDOW's edge and the mic button actually drawn inside
      *  it (#128) -- the window is [RING_DP]-scaled while the button is the smaller [BTN_DP],

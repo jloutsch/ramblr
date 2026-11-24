@@ -47,6 +47,11 @@ class RingPeekTest {
         assertEquals(-94 + 52 - 147 + 15, RingPeek.peekedX(x = 21, screenW = 2120, ringSize = 147, peekVisiblePx = 52, ringInsetPx = 15, leftEdge = -94))
     }
 
+    @Test fun `a right peek reaches past a hidden right navigation bar to the real edge`() {
+        // Fullscreen video hides the 126 px right bar that screenW stops at.
+        assertEquals(1126 - 20, RingPeek.peekedX(x = 900, screenW, ringSize, peekVisiblePx = 20, rightEdge = 1126))
+    }
+
     @Test fun `auto-peek allowed only while idle`() {
         assertTrue(RingPeek.shouldAutoPeek(RecordingStateMachine.State.IDLE))
         assertFalse(RingPeek.shouldAutoPeek(RecordingStateMachine.State.RECORDING))
